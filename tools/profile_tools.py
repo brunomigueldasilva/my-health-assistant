@@ -1,0 +1,265 @@
+"""
+Profile Tools — manage user preferences, goals, and health data.
+Tool docstrings in English for LLM reliability.
+"""
+
+import logging
+import sqlite3
+from datetime import datetime
+from typing import Optional
+
+from config import SQLITE_DB
+from knowledge import get_knowledge_base
+from xai import xai_tool
+
+logger = logging.getLogger(__name__)
+
+
+def _get_db():
+    """Return SQLite connection, ensuring tables exist."""
+    conn = sqlite3.connect(str(SQLITE_DB))
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS user_profiles (
+            user_id TEXT PRIMARY KEY,
+            name TEXT,
+            age INTEGER,
+            gender TEXT,
+            height_cm REAL,
+            weight_kg REAL,
+            activity_level TEXT DEFAULT 'moderado',
+            goal TEXT,
+            created_at TEXT,
+            updated_at TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS weight_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT,
+            weight_kg REAL,
+            recorded_at TEXT
+        )"""
+    )
+    conn.commit()
+    return conn
+
+
+@xai_tool
+def get_user_profile(user_id: str) -> str:
+    """
+    Get the complete user profile including dietary preferences.
+
+    Args:
+        user_id: Telegram user ID
+
+    Returns:
+        Full profile with personal data and food preferences
+    """
+    conn = _get_db()
+    row = conn.execute(
+        "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    conn.close()
+
+    kb = get_knowledge_base()
+    prefs = kb.get_user_profile_summary(user_id)
+
+    if not row:
+        prefs_default = kb.get_user_profile_summary("default")
+        return (
+            f"⚠️ Perfil não configurado para user_id={user_id}.\n\n"
+            f"Preferências (default):\n{prefs_default}\n\n"
+            f"💡 Usa /perfil para configurar."
+        )
+
+    return (
+        f"👤 Perfil de {row['name'] or 'Utilizador'}:\n"
+        f"  • Idade: {row['age'] or '?'} anos\n"
+        f"  • Género: {row['gender'] or '?'}\n"
+        f"  • Altura: {row['height_cm'] or '?'} cm\n"
+        f"  • Peso: {row['weight_kg'] or '?'} kg\n"
+        f"  • Actividade: {row['activity_level'] or '?'}\n"
+        f"  • Objectivo: {row['goal'] or 'Não definido'}\n\n"
+        f"🍽️ Preferências:\n{prefs}"
+    )
+
+
+@xai_tool
+def update_user_profile(
+    user_id: str,
+    name: Optional[str] = None,
+    age: Optional[int] = None,
+    gender: Optional[str] = None,
+    height_cm: Optional[float] = None,
+    weight_kg: Optional[float] = None,
+    activity_level: Optional[str] = None,
+    goal: Optional[str] = None,
+) -> str:
+    """
+    Update user profile. Only provided fields are updated.
+
+    Args:
+        user_id: Telegram user ID
+        name: User's name
+        age: Age in years
+        gender: "male" or "female"
+        height_cm: Height in centimeters
+        weight_kg: Weight in kilograms
+        activity_level: "sedentary", "light", "moderate", "active", "very_active"
+        goal: Health goal (e.g. "lose visceral fat", "gain muscle", "maintain weight")
+
+    Returns:
+        Confirmation of update
+    """
+    conn = _get_db()
+    now = datetime.now().isoformat()
+
+    existing = conn.execute(
+        "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
+    ).fetchone()
+
+    if not existing:
+        conn.execute(
+            """INSERT INTO user_profiles
+               (user_id, name, age, gender, height_cm, weight_kg,
+                activity_level, goal, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (user_id, name, age, gender, height_cm, weight_kg,
+             activity_level, goal, now, now),
+        )
+        # Seed default preferences for the new user
+        try:
+            from knowledge.seed_data import seed_user_preferences
+            seed_user_preferences(user_id)
+        except Exception as exc:
+            logger.warning("Could not seed preferences for %s: %s", user_id, exc)
+    else:
+        updates, params = [], []
+        for field, value in [
+            ("name", name), ("age", age), ("gender", gender),
+            ("height_cm", height_cm), ("weight_kg", weight_kg),
+            ("activity_level", activity_level), ("goal", goal),
+        ]:
+            if value is not None:
+                updates.append(f"{field} = ?")
+                params.append(value)
+        if updates:
+            updates.append("updated_at = ?")
+            params.extend([now, user_id])
+            conn.execute(
+                f"UPDATE user_profiles SET {', '.join(updates)} WHERE user_id = ?",
+                params,
+            )
+
+    if weight_kg is not None:
+        conn.execute(
+            "INSERT INTO weight_history (user_id, weight_kg, recorded_at) VALUES (?, ?, ?)",
+            (user_id, weight_kg, now),
+        )
+
+    conn.commit()
+    conn.close()
+
+    updated = [
+        label for label, v in [
+            ("nome", name), ("idade", age), ("género", gender),
+            ("altura", height_cm), ("peso", weight_kg),
+            ("actividade", activity_level), ("objectivo", goal),
+        ] if v is not None
+    ]
+    return f"✅ Perfil actualizado: {', '.join(updated)}"
+
+
+@xai_tool
+def add_food_preference(user_id: str, food: str, likes: bool) -> str:
+    """
+    Add a food preference for the user.
+
+    Args:
+        user_id: Telegram user ID
+        food: Food name
+        likes: True if user likes it, False if user dislikes it
+
+    Returns:
+        Confirmation message
+    """
+    kb = get_knowledge_base()
+    category = "food_likes" if likes else "food_dislikes"
+    kb.add_preference(
+        user_id, category, food,
+        {"sentiment": "positive" if likes else "negative"},
+    )
+    emoji = "👍" if likes else "👎"
+    action = "gosta de" if likes else "não gosta de"
+    return f"{emoji} Registado: {action} **{food}**"
+
+
+@xai_tool
+def add_health_goal(user_id: str, goal: str) -> str:
+    """
+    Add a health or fitness goal for the user.
+
+    Args:
+        user_id: Telegram user ID
+        goal: Goal description (e.g. "lose 5kg in 3 months", "reduce visceral fat")
+
+    Returns:
+        Confirmation message
+    """
+    kb = get_knowledge_base()
+    kb.add_preference(
+        user_id, "goals", goal,
+        {"type": "health_goal", "created": datetime.now().isoformat()},
+    )
+    conn = _get_db()
+    conn.execute(
+        "UPDATE user_profiles SET goal = ?, updated_at = ? WHERE user_id = ?",
+        (goal, datetime.now().isoformat(), user_id),
+    )
+    conn.commit()
+    conn.close()
+    return f"🎯 Objectivo registado: **{goal}**"
+
+
+@xai_tool
+def get_weight_history(user_id: str) -> str:
+    """
+    Get the user's weight tracking history.
+
+    Args:
+        user_id: Telegram user ID
+
+    Returns:
+        Weight history with dates and trend
+    """
+    conn = _get_db()
+    rows = conn.execute(
+        """SELECT weight_kg, recorded_at FROM weight_history
+           WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 20""",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    if not rows:
+        return "📊 Sem histórico de peso. Usa /peso <kg> para registar."
+
+    lines = ["📊 Histórico de peso:\n"]
+    for row in rows:
+        lines.append(f"  {row['recorded_at'][:10]}: {row['weight_kg']} kg")
+
+    if len(rows) >= 2:
+        diff = rows[0]["weight_kg"] - rows[-1]["weight_kg"]
+        icon = "⬇️" if diff < 0 else "⬆️" if diff > 0 else "➡️"
+        lines.append(f"\n{icon} Variação: {diff:+.1f} kg")
+
+    return "\n".join(lines)
+
+
+PROFILE_TOOLS = [
+    get_user_profile,
+    update_user_profile,
+    add_food_preference,
+    add_health_goal,
+    get_weight_history,
+]
