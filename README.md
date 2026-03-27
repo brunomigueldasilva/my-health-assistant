@@ -33,27 +33,27 @@ with two interfaces: Telegram Bot and Gradio Web UI.
 ollama serve
 
 # Pull the recommended model
-ollama pull qwen3:8b
+ollama pull qwen2.5:32b
 ```
 
 **macOS**
 ```bash
 brew install ollama
 ollama serve
-ollama pull qwen3:8b
+ollama pull qwen2.5:32b
 ```
 
 **Linux**
 ```bash
 curl -fsSL https://ollama.com/install.sh | sh
 ollama serve
-ollama pull qwen3:8b
+ollama pull qwen2.5:32b
 ```
 
 Set in `.env`:
 ```env
 LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:8b
+OLLAMA_MODEL=qwen2.5:32b
 ```
 
 #### Option B — Gemini API (Google)
@@ -245,7 +245,7 @@ Just change `LLM_PROVIDER` in `.env` — no code changes required:
 ```env
 # Ollama (local, free)
 LLM_PROVIDER=ollama
-OLLAMA_MODEL=qwen3:8b
+OLLAMA_MODEL=qwen2.5:32b
 
 # Gemini (Google)
 LLM_PROVIDER=gemini

@@ -32,7 +32,7 @@ def search_food_nutrition(food_name: str) -> str:
 
 
 @xai_tool
-def search_user_food_preferences(query: str, user_id: str = "") -> str:
+def search_user_food_preferences(query: str, user_id: str | int = "") -> str:
     """
     Search the user's food preferences and dietary restrictions.
 
@@ -44,7 +44,7 @@ def search_user_food_preferences(query: str, user_id: str = "") -> str:
         List of the user's food preferences
     """
     kb = get_knowledge_base()
-    uid = user_id.strip() if user_id else ""
+    uid = str(user_id).strip() if user_id else ""
     results = kb.search_preferences(uid, query, n_results=20) if uid else []
 
     if not results:

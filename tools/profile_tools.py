@@ -46,7 +46,7 @@ def _get_db():
 
 
 @xai_tool
-def get_user_profile(user_id: str) -> str:
+def get_user_profile(user_id: str | int) -> str:
     """
     Get the complete user profile including dietary preferences.
 
@@ -56,6 +56,7 @@ def get_user_profile(user_id: str) -> str:
     Returns:
         Full profile with personal data and food preferences
     """
+    user_id = str(user_id)
     conn = _get_db()
     row = conn.execute(
         "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
@@ -87,7 +88,7 @@ def get_user_profile(user_id: str) -> str:
 
 @xai_tool
 def update_user_profile(
-    user_id: str,
+    user_id: str | int,
     name: Optional[str] = None,
     age: Optional[int] = None,
     gender: Optional[str] = None,
@@ -100,7 +101,7 @@ def update_user_profile(
     Update user profile. Only provided fields are updated.
 
     Args:
-        user_id: Telegram user ID
+        user_id: Telegram user ID (string or integer)
         name: User's name
         age: Age in years
         gender: "male" or "female"
@@ -112,6 +113,7 @@ def update_user_profile(
     Returns:
         Confirmation of update
     """
+    user_id = str(user_id)
     conn = _get_db()
     now = datetime.now().isoformat()
 
@@ -172,7 +174,7 @@ def update_user_profile(
 
 
 @xai_tool
-def add_food_preference(user_id: str, food: str, likes: bool) -> str:
+def add_food_preference(user_id: str | int, food: str, likes: bool) -> str:
     """
     Add a food preference for the user.
 
@@ -184,6 +186,7 @@ def add_food_preference(user_id: str, food: str, likes: bool) -> str:
     Returns:
         Confirmation message
     """
+    user_id = str(user_id)
     kb = get_knowledge_base()
     category = "food_likes" if likes else "food_dislikes"
     kb.add_preference(
@@ -196,7 +199,7 @@ def add_food_preference(user_id: str, food: str, likes: bool) -> str:
 
 
 @xai_tool
-def add_health_goal(user_id: str, goal: str) -> str:
+def add_health_goal(user_id: str | int, goal: str) -> str:
     """
     Add a health or fitness goal for the user.
 
@@ -207,6 +210,7 @@ def add_health_goal(user_id: str, goal: str) -> str:
     Returns:
         Confirmation message
     """
+    user_id = str(user_id)
     kb = get_knowledge_base()
     kb.add_preference(
         user_id, "goals", goal,
@@ -223,7 +227,7 @@ def add_health_goal(user_id: str, goal: str) -> str:
 
 
 @xai_tool
-def get_weight_history(user_id: str) -> str:
+def get_weight_history(user_id: str | int) -> str:
     """
     Get the user's weight tracking history.
 
@@ -233,6 +237,7 @@ def get_weight_history(user_id: str) -> str:
     Returns:
         Weight history with dates and trend
     """
+    user_id = str(user_id)
     conn = _get_db()
     rows = conn.execute(
         """SELECT weight_kg, recorded_at FROM weight_history

@@ -31,10 +31,10 @@ CHROMA_DIR.mkdir(exist_ok=True)
 LLM_PROVIDER = os.getenv("LLM_PROVIDER", "ollama").lower()
 
 # ── Ollama (local) ────────────────────────────────────
-# Recommended: qwen3:8b (best tool calling + Portuguese)
-# Alternatives: qwen3:14b, qwen3:30b-a3b, llama3.1:8b
+# Recommended: qwen2.5:32b (RTX 4090 / 24GB VRAM — fast, no thinking overhead)
+# Alternatives: qwen2.5:14b, qwen3:8b, llama3.1:8b
 OLLAMA_HOST    = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "qwen3:8b")
+OLLAMA_MODEL   = os.getenv("OLLAMA_MODEL", "qwen2.5:32b")
 # num_ctx: context window size (smaller = faster, default ~8192)
 # num_predict: max output tokens (limits response length)
 OLLAMA_NUM_CTX     = int(os.getenv("OLLAMA_NUM_CTX", "4096"))
