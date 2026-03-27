@@ -501,7 +501,7 @@ def add_knowledge_fn(collection: str, text: str):
         doc_id = kb.add_nutrition_info(text.strip())
     else:
         doc_id = kb.add_exercise_info(text.strip())
-    return f"✅ Adicionado com ID: {doc_id}"
+    return f"✅ Adicionado com o ID: {doc_id}"
 
 
 def delete_knowledge_fn(collection: str, doc_id_partial: str):
@@ -536,345 +536,191 @@ def kb_stats_fn():
 
 with gr.Blocks(title="Health Assistant") as demo:
 
-    gr.Markdown(
-        "# 🌿 Health Assistant\n"
-        "Assistente de saúde com IA — Nutricionista · Personal Trainer · Chef"
-    )
+    with gr.Sidebar():
+        gr.Markdown("# 🌿 Health Assistant")
+        gr.Markdown("Gerir Utilizador")
 
-    # ── User ID global ───────────────────────────────────
-    with gr.Row():
         global_uid = gr.Textbox(
             label="User ID",
             placeholder="O teu Telegram ID ou outro identificador…",
-            scale=3,
         )
 
-    with gr.Row():
         _initial_users = list_users()
         user_select = gr.Dropdown(
-            label="👤 Seleccionar utilizador existente",
+            label="👤 Seleccionar utilizador",
             choices=_initial_users,
             value=None,
             interactive=True,
-            scale=3,
         )
-        refresh_users_btn = gr.Button("🔄 Actualizar lista", variant="secondary", scale=1)
+        refresh_users_btn = gr.Button("🔄 Actualizar lista", variant="secondary")
 
-    gr.Markdown(
-        "ℹ️ O **User ID** é partilhado entre todos os tabs. "
-        "Usa o teu Telegram user ID para ver dados existentes."
-    )
+        gr.Markdown("---")
+        reset_btn = gr.Button("🔄 Nova Sessão", variant="secondary")
+        reset_status = gr.Markdown()
+
+        gr.Markdown(
+            "ℹ️ O **User ID** é partilhado entre todas as abas. "
+            "Usa o teu Telegram user ID para ver dados existentes."
+        )
 
     with gr.Tabs():
 
         # ── TAB: CHAT ────────────────────────────────────
-        with gr.Tab("💬 Chat"):
+        with gr.Tab("💬 Conversa"):
             chatbot = gr.Chatbot(
                 label="Health Assistant",
-                height=500,
+                height=600,
                 avatar_images=(None, "https://em-content.zobj.net/source/google/350/seedling_1f331.png"),
                 render_markdown=True,
             )
+            with gr.Group():
+                with gr.Row():
+                    msg_input = gr.Textbox(
+                        placeholder="Pergunta algo ao teu assistente de saúde…",
+                        label="Mensagem",
+                        scale=5,
+                        lines=1,
+                    )
+                    send_btn = gr.Button("Enviar", variant="primary", scale=1)
+
+        # ── TAB: PERFIL E SAÚDE ──────────────────────────
+        with gr.Tab("👤 O Meu Perfil"):
             with gr.Row():
-                msg_input = gr.Textbox(
-                    placeholder="Pergunta algo ao teu assistente de saúde…",
-                    label="Mensagem",
-                    scale=5,
-                    lines=1,
-                )
-                send_btn = gr.Button("Enviar", variant="primary", scale=1)
-
-            with gr.Row():
-                reset_btn = gr.Button("🔄 Nova Sessão", variant="secondary", scale=1)
-                reset_status = gr.Markdown()
-
-            # (event handlers registados após todas as tabs — ver fim do ficheiro)
-
-        # ── TAB: EXPLICABILIDADE XAI ─────────────────────
-        with gr.Tab("🔍 Explicabilidade"):
-            gr.Markdown(
-                "## 🧠 Explainable AI (XAI)\n"
-                "Transparência automática de cada resposta: qual especialista foi activado, "
-                "que ferramentas foram chamadas, que fontes RAG foram consultadas "
-                "e quais as fórmulas matemáticas utilizadas.\n\n"
-                "**Como usar:** Envia uma mensagem no tab 💬 Chat e depois clica em "
-                "**🔄 Actualizar Análise** para ver a explicação completa."
-            )
-            with gr.Row():
-                xai_refresh_btn = gr.Button("🔄 Actualizar Análise XAI", variant="primary", scale=2)
-                xai_clear_btn   = gr.Button("🗑️ Limpar", variant="secondary", scale=1)
-
-            xai_display = gr.Markdown(
-                value=(
-                    "_Nenhuma análise disponível ainda._\n\n"
-                    "Envia uma mensagem no tab **💬 Chat** e depois clica em "
-                    "**🔄 Actualizar Análise** para ver a explicação."
-                )
-            )
-
-            def _load_xai():
-                from xai import get_tracker
-                return get_tracker().generate_markdown()
-
-            def _clear_xai():
-                return "_Análise limpa. Envia uma nova mensagem no Chat._"
-
-            xai_refresh_btn.click(_load_xai, outputs=[xai_display])
-            xai_clear_btn.click(_clear_xai, outputs=[xai_display])
-
-        # ── TAB: PERFIL ──────────────────────────────────
-        with gr.Tab("👤 Perfil"):
-            with gr.Row():
-                load_profile_btn = gr.Button("Carregar Perfil", variant="primary")
-                save_profile_btn = gr.Button("Guardar Alterações", variant="secondary")
+                load_profile_btn = gr.Button("📥 Carregar Tudo", variant="primary")
+                save_profile_btn = gr.Button("💾 Guardar Alterações", variant="secondary")
                 profile_status = gr.Markdown()
 
-            with gr.Row():
-                with gr.Column():
-                    pf_name = gr.Textbox(label="Nome")
-                    pf_age = gr.Number(label="Idade", precision=0)
-                    pf_gender = gr.Radio(
-                        ["male", "female"],
-                        label="Género",
-                        info="male = Masculino · female = Feminino",
+            with gr.Accordion("📝 Informação Pessoal", open=True):
+                with gr.Row():
+                    with gr.Column():
+                        pf_name = gr.Textbox(label="Nome")
+                        pf_age = gr.Number(label="Idade", precision=0)
+                        pf_gender = gr.Radio(
+                            ["male", "female"],
+                            label="Género",
+                            info="male = Masculino · female = Feminino",
+                        )
+                    with gr.Column():
+                        pf_height = gr.Number(label="Altura (cm)", precision=1)
+                        pf_weight = gr.Number(label="Peso actual (kg)", precision=1)
+                        pf_activity = gr.Dropdown(
+                            ["sedentary", "light", "moderate", "active", "very_active"],
+                            label="Nível de Actividade",
+                        )
+                pf_goal = gr.Textbox(label="Objectivo principal", lines=2)
+
+            with gr.Accordion("🍽️ Preferências e Restrições", open=False):
+                with gr.Row():
+                    pf_likes = gr.Textbox(label="Alimentos que GOSTA", lines=4, interactive=False)
+                    pf_dislikes = gr.Textbox(label="Alimentos que NÃO GOSTA", lines=4, interactive=False)
+                with gr.Row():
+                    pf_allergies = gr.Textbox(label="Alergias", lines=3, interactive=False)
+                    pf_goals_disp = gr.Textbox(label="Objectivos Adicionais", lines=3, interactive=False)
+                with gr.Row():
+                    pf_restrictions = gr.Textbox(label="Restrições", lines=3, interactive=False)
+                    pf_health = gr.Textbox(label="Dados de Saúde", lines=3, interactive=False)
+
+                gr.Markdown("### Adicionar / Remover")
+                with gr.Row():
+                    with gr.Column():
+                        new_like = gr.Textbox(label="Novo Gosto", placeholder="Ex: salmão")
+                        add_like_btn = gr.Button("+ Gosto", variant="primary")
+                    with gr.Column():
+                        new_dislike = gr.Textbox(label="Novo Não Gosto", placeholder="Ex: beterraba")
+                        add_dislike_btn = gr.Button("+ Não Gosto", variant="stop")
+                with gr.Row():
+                    with gr.Column():
+                        new_category_text = gr.Textbox(label="Alergia / Restrição / Saúde", placeholder="Ex: lactose")
+                        new_category_type = gr.Dropdown(
+                            ["allergies", "restrictions", "health_data"],
+                            label="Categoria",
+                            value="allergies",
+                        )
+                        add_category_btn = gr.Button("+ Adicionar", variant="secondary")
+                    with gr.Column():
+                        remove_text = gr.Textbox(label="Remover por nome", placeholder="Ex: beterraba")
+                        remove_btn = gr.Button("Remover", variant="stop")
+
+                with gr.Row():
+                    apply_seed_btn = gr.Button("🌱 Aplicar Preferências Padrão", variant="secondary")
+                    seed_status = gr.Markdown()
+                    load_prefs_btn = gr.Button("🔄 Actualizar Vista", variant="secondary")
+                    pref_status = gr.Markdown()
+
+            with gr.Accordion("📈 Evolução de Peso", open=False):
+                with gr.Row():
+                    new_weight = gr.Number(label="Registar novo peso (kg)", precision=1)
+                    add_weight_btn = gr.Button("Registar", variant="primary")
+                    weight_status = gr.Markdown()
+
+                weight_chart = gr.LinePlot(
+                    x="Data",
+                    y="Peso (kg)",
+                    title="Histórico",
+                    height=300,
+                    show_label=False,
+                )
+
+        # ── TAB: ADMINISTRAÇÃO ───────────────────────────
+        with gr.Tab("⚙️ Administração"):
+            with gr.Tabs():
+                with gr.Tab("🔍 Explicabilidade"):
+                    gr.Markdown("### 🧠 Explainable AI (XAI)")
+                    with gr.Row():
+                        xai_refresh_btn = gr.Button("🔄 Actualizar Análise XAI", variant="primary")
+                        xai_clear_btn = gr.Button("🗑️ Limpar", variant="secondary")
+                    xai_display = gr.Markdown("_Nenhuma análise disponível ainda._")
+
+                with gr.Tab("📋 Sessões"):
+                    with gr.Row():
+                        sessions_uid_filter = gr.Textbox(label="Filtrar por User ID")
+                        load_sessions_btn = gr.Button("Carregar", variant="primary")
+                    sessions_table = gr.DataFrame(
+                        headers=["Session ID", "User ID", "Tipo", "Mensagens", "Actualizado"],
+                        datatype=["str", "str", "str", "number", "str"],
+                        interactive=False,
                     )
-                    pf_activity = gr.Dropdown(
-                        ["sedentary", "light", "moderate", "active", "very_active"],
-                        label="Nível de Actividade",
-                    )
-                with gr.Column():
-                    pf_height = gr.Number(label="Altura (cm)", precision=1)
-                    pf_weight = gr.Number(label="Peso actual (kg)", precision=1)
-                    pf_goal = gr.Textbox(label="Objectivo principal", lines=3)
+                    with gr.Row():
+                        session_id_input = gr.Textbox(label="Session ID")
+                        view_session_btn = gr.Button("Ver Detalhes", variant="primary")
+                        delete_session_btn = gr.Button("Eliminar", variant="stop")
+                    session_detail = gr.Markdown()
+                    sessions_status = gr.Markdown()
 
-            gr.Markdown("### Histórico de Peso")
-            with gr.Row():
-                new_weight = gr.Number(label="Registar novo peso (kg)", precision=1)
-                add_weight_btn = gr.Button("Registar", variant="primary")
-                weight_status = gr.Markdown()
+                with gr.Tab("📄 Logs"):
+                    with gr.Row():
+                        log_level = gr.Dropdown(["Todos", "INFO", "WARNING", "ERROR", "CRITICAL", "DEBUG"], value="Todos", label="Nível")
+                        log_search = gr.Textbox(label="Pesquisar")
+                        log_n = gr.Slider(50, 1000, value=200, step=50, label="Linhas")
+                        load_logs_btn = gr.Button("Actualizar", variant="primary")
+                    log_output = gr.Textbox(label="Logs", lines=20, interactive=False)
+                    log_stats_btn = gr.Button("Estatísticas")
+                    log_stats_out = gr.Markdown()
 
-            weight_chart = gr.LinePlot(
-                x="Data",
-                y="Peso (kg)",
-                title="Evolução do Peso",
-                height=300,
-                show_label=False,
-            )
-
-            load_profile_btn.click(
-                load_profile,
-                inputs=[global_uid],
-                outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
-            ).then(
-                load_weight_chart,
-                inputs=[global_uid],
-                outputs=[weight_chart],
-            )
-
-            save_profile_btn.click(
-                save_profile,
-                inputs=[global_uid, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
-                outputs=[profile_status],
-            )
-
-            add_weight_btn.click(
-                add_weight_entry,
-                inputs=[global_uid, new_weight],
-                outputs=[weight_status, weight_chart],
-            )
-
-        # ── TAB: PREFERÊNCIAS ────────────────────────────
-        with gr.Tab("🍽️ Preferências"):
-            with gr.Row():
-                load_prefs_btn = gr.Button("Carregar Preferências", variant="primary")
-                pref_status = gr.Markdown()
-
-            with gr.Row():
-                pf_likes = gr.Textbox(label="Alimentos que GOSTA", lines=5, interactive=False)
-                pf_dislikes = gr.Textbox(label="Alimentos que NÃO GOSTA", lines=5, interactive=False)
-
-            with gr.Row():
-                pf_allergies = gr.Textbox(label="Alergias", lines=3, interactive=False)
-                pf_goals_disp = gr.Textbox(label="Objectivos", lines=3, interactive=False)
-
-            with gr.Row():
-                pf_restrictions = gr.Textbox(label="Restrições", lines=3, interactive=False)
-                pf_health = gr.Textbox(label="Dados de Saúde", lines=3, interactive=False)
-
-            with gr.Row():
-                apply_seed_btn = gr.Button("🌱 Aplicar Preferências Padrão", variant="secondary")
-                seed_status = gr.Markdown()
-
-            gr.Markdown("### Adicionar / Remover")
-            with gr.Row():
-                with gr.Column():
-                    new_like = gr.Textbox(label="Adicionar alimento que gosta", placeholder="Ex: salmão")
-                    add_like_btn = gr.Button("+ Gosto", variant="primary")
-                with gr.Column():
-                    new_dislike = gr.Textbox(label="Adicionar alimento que não gosta", placeholder="Ex: beterraba")
-                    add_dislike_btn = gr.Button("+ Não Gosto", variant="stop")
-                with gr.Column():
-                    new_goal_inp = gr.Textbox(label="Novo objectivo", placeholder="Ex: perder 5kg em 3 meses")
-                    add_goal_btn = gr.Button("+ Objectivo", variant="secondary")
-
-            with gr.Row():
-                with gr.Column():
-                    new_category_text = gr.Textbox(label="Texto (alergia / restrição / saúde)", placeholder="Ex: intolerância à lactose")
-                    new_category_type = gr.Dropdown(
-                        ["allergies", "restrictions", "health_data"],
-                        label="Categoria",
-                        value="allergies",
-                    )
-                    add_category_btn = gr.Button("+ Adicionar", variant="secondary")
-                with gr.Column():
-                    remove_text = gr.Textbox(label="Remover por nome (qualquer categoria)", placeholder="Ex: beterraba")
-                    remove_btn = gr.Button("Remover", variant="stop")
-
-            apply_seed_btn.click(apply_seed_fn, inputs=[global_uid], outputs=[seed_status])
-
-            load_prefs_btn.click(
-                load_preferences,
-                inputs=[global_uid],
-                outputs=[pf_likes, pf_dislikes, pf_allergies, pf_goals_disp, pf_restrictions, pf_health],
-            )
-            add_like_btn.click(add_like, inputs=[global_uid, new_like], outputs=[pref_status])
-            add_dislike_btn.click(add_dislike, inputs=[global_uid, new_dislike], outputs=[pref_status])
-            add_goal_btn.click(add_goal_fn, inputs=[global_uid, new_goal_inp], outputs=[pref_status])
-            add_category_btn.click(
-                add_allergy_fn,
-                inputs=[global_uid, new_category_text, new_category_type],
-                outputs=[pref_status],
-            )
-            remove_btn.click(remove_preference_fn, inputs=[global_uid, remove_text], outputs=[pref_status])
-
-        # ── TAB: SESSÕES ─────────────────────────────────
-        with gr.Tab("📋 Sessões"):
-            with gr.Row():
-                sessions_uid_filter = gr.Textbox(
-                    label="Filtrar por User ID (opcional)",
-                    placeholder="Deixa vazio para ver todas",
-                )
-                load_sessions_btn = gr.Button("Carregar", variant="primary")
-                sessions_status = gr.Markdown()
-
-            sessions_table = gr.DataFrame(
-                headers=["Session ID", "User ID", "Tipo", "Mensagens", "Actualizado"],
-                datatype=["str", "str", "str", "number", "str"],
-                label="Sessões",
-                interactive=False,
-                row_count=(10, "dynamic"),
-            )
-
-            gr.Markdown("### Detalhes da Sessão")
-            with gr.Row():
-                session_id_input = gr.Textbox(
-                    label="Session ID (copia da tabela acima)",
-                    placeholder="Cole aqui o Session ID…",
-                )
-                view_session_btn = gr.Button("Ver Mensagens", variant="primary")
-                delete_session_btn = gr.Button("Eliminar Sessão", variant="stop")
-
-            session_detail = gr.Markdown()
-
-            load_sessions_btn.click(
-                load_sessions,
-                inputs=[sessions_uid_filter],
-                outputs=[sessions_table],
-            )
-            view_session_btn.click(
-                view_session_messages,
-                inputs=[session_id_input],
-                outputs=[session_detail],
-            )
-            delete_session_btn.click(
-                delete_session_fn,
-                inputs=[session_id_input],
-                outputs=[sessions_status],
-            ).then(load_sessions, inputs=[sessions_uid_filter], outputs=[sessions_table])
-
-        # ── TAB: LOGS ────────────────────────────────────
-        with gr.Tab("📄 Logs"):
-            with gr.Row():
-                log_level = gr.Dropdown(
-                    ["Todos", "INFO", "WARNING", "ERROR", "CRITICAL", "DEBUG"],
-                    value="Todos",
-                    label="Nível",
-                )
-                log_search = gr.Textbox(label="Pesquisar", placeholder="Texto a filtrar…")
-                log_n = gr.Slider(50, 1000, value=200, step=50, label="Máx. linhas")
-                load_logs_btn = gr.Button("Actualizar", variant="primary")
-
-            with gr.Row():
-                log_stats_btn = gr.Button("Ver Estatísticas")
-                log_stats_out = gr.Markdown()
-
-            log_output = gr.Textbox(
-                label="Logs (mais recentes primeiro)",
-                lines=30,
-                interactive=False,
-            )
-
-            load_logs_btn.click(
-                load_logs,
-                inputs=[log_level, log_search, log_n],
-                outputs=[log_output],
-            )
-            log_stats_btn.click(log_stats_fn, outputs=[log_stats_out])
-
-        # ── TAB: CONHECIMENTO ────────────────────────────
-        with gr.Tab("🧠 Base de Conhecimento"):
-            with gr.Row():
-                kb_collection = gr.Radio(
-                    ["Nutrição", "Exercícios"],
-                    value="Nutrição",
-                    label="Colecção",
-                )
-                kb_search = gr.Textbox(label="Pesquisa semântica", placeholder="Ex: proteína, HIIT, calorias…")
-                load_kb_btn = gr.Button("Carregar / Pesquisar", variant="primary")
-
-            kb_stats_out = gr.Markdown()
-            kb_stats_btn = gr.Button("Ver estatísticas")
-
-            kb_table = gr.DataFrame(
-                headers=["ID", "Texto"],
-                datatype=["str", "str"],
-                label="Documentos",
-                interactive=False,
-                row_count=(10, "dynamic"),
-                wrap=True,
-            )
-
-            gr.Markdown("### Gerir Documentos")
-            with gr.Row():
-                with gr.Column():
-                    new_kb_text = gr.Textbox(label="Novo documento", lines=4)
-                    add_kb_btn = gr.Button("Adicionar", variant="primary")
-                with gr.Column():
-                    del_kb_id = gr.Textbox(label="ID a eliminar (prefixo)", placeholder="Ex: nutrition_12345…")
-                    del_kb_btn = gr.Button("Eliminar", variant="stop")
-            kb_action_status = gr.Markdown()
-
-            load_kb_btn.click(
-                load_knowledge,
-                inputs=[kb_collection, kb_search],
-                outputs=[kb_table],
-            )
-            kb_stats_btn.click(kb_stats_fn, outputs=[kb_stats_out])
-            add_kb_btn.click(
-                add_knowledge_fn,
-                inputs=[kb_collection, new_kb_text],
-                outputs=[kb_action_status],
-            ).then(load_knowledge, inputs=[kb_collection, kb_search], outputs=[kb_table])
-            del_kb_btn.click(
-                delete_knowledge_fn,
-                inputs=[kb_collection, del_kb_id],
-                outputs=[kb_action_status],
-            ).then(load_knowledge, inputs=[kb_collection, kb_search], outputs=[kb_table])
+                with gr.Tab("🧠 Base de Conhecimento"):
+                    with gr.Row():
+                        kb_collection = gr.Radio(["Nutrição", "Exercícios"], value="Nutrição", label="Colecção")
+                        kb_search = gr.Textbox(label="Pesquisa")
+                        load_kb_btn = gr.Button("Carregar", variant="primary")
+                    kb_table = gr.DataFrame(headers=["ID", "Texto"], datatype=["str", "str"], interactive=False)
+                    with gr.Row():
+                        new_kb_text = gr.Textbox(label="Novo Documento", lines=3)
+                        add_kb_btn = gr.Button("Adicionar", variant="primary")
+                    with gr.Row():
+                        del_kb_id = gr.Textbox(label="ID a eliminar")
+                        del_kb_btn = gr.Button("Eliminar", variant="stop")
+                    kb_stats_btn = gr.Button("Estatísticas")
+                    kb_stats_out = gr.Markdown()
+                    kb_action_status = gr.Markdown()
 
 
-    # ── Chat event handlers ──────────────────────────────
-    # Definidos aqui (fora do bloco de tabs) para poder referenciar
-    # xai_display (definido na tab Explicabilidade) como output adicional.
+    # ── EVENT HANDLERS ───────────────────────────────────
+
+    def _load_xai():
+        from xai import get_tracker
+        return get_tracker().generate_markdown()
+
+    # 1. Chat
     send_btn.click(
         chat_fn,
         inputs=[msg_input, chatbot, global_uid],
@@ -889,17 +735,62 @@ with gr.Blocks(title="Health Assistant") as demo:
 
     reset_btn.click(reset_chat, inputs=[global_uid], outputs=[chatbot, reset_status])
 
-    # ── User selection ───────────────────────────────────
-    user_select.change(
-        fn=lambda uid: uid if uid else gr.update(),
-        inputs=[user_select],
-        outputs=[global_uid],
+    # 2. Perfil
+    load_profile_btn.click(
+        load_profile,
+        inputs=[global_uid],
+        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    ).then(
+        load_weight_chart,
+        inputs=[global_uid],
+        outputs=[weight_chart],
+    ).then(
+        load_preferences,
+        inputs=[global_uid],
+        outputs=[pf_likes, pf_dislikes, pf_allergies, pf_goals_disp, pf_restrictions, pf_health],
     )
-    def _refresh_users():
-        return gr.update(choices=list_users(), value=None)
 
-    refresh_users_btn.click(
-        fn=_refresh_users,
-        outputs=[user_select],
+    save_profile_btn.click(
+        save_profile,
+        inputs=[global_uid, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        outputs=[profile_status],
     )
+
+    add_weight_btn.click(
+        add_weight_entry,
+        inputs=[global_uid, new_weight],
+        outputs=[weight_status, weight_chart],
+    )
+
+    # 3. Preferências
+    load_prefs_btn.click(
+        load_preferences,
+        inputs=[global_uid],
+        outputs=[pf_likes, pf_dislikes, pf_allergies, pf_goals_disp, pf_restrictions, pf_health],
+    )
+    add_like_btn.click(add_like, inputs=[global_uid, new_like], outputs=[pref_status])
+    add_dislike_btn.click(add_dislike, inputs=[global_uid, new_dislike], outputs=[pref_status])
+    add_category_btn.click(add_allergy_fn, inputs=[global_uid, new_category_text, new_category_type], outputs=[pref_status])
+    remove_btn.click(remove_preference_fn, inputs=[global_uid, remove_text], outputs=[pref_status])
+    apply_seed_btn.click(apply_seed_fn, inputs=[global_uid], outputs=[seed_status])
+
+    # 4. Admin
+    xai_refresh_btn.click(_load_xai, outputs=[xai_display])
+    xai_clear_btn.click(lambda: "_Análise limpa._", outputs=[xai_display])
+
+    load_sessions_btn.click(load_sessions, inputs=[sessions_uid_filter], outputs=[sessions_table])
+    view_session_btn.click(view_session_messages, inputs=[session_id_input], outputs=[session_detail])
+    delete_session_btn.click(delete_session_fn, inputs=[session_id_input], outputs=[sessions_status]).then(load_sessions, inputs=[sessions_uid_filter], outputs=[sessions_table])
+
+    load_logs_btn.click(load_logs, inputs=[log_level, log_search, log_n], outputs=[log_output])
+    log_stats_btn.click(log_stats_fn, outputs=[log_stats_out])
+
+    load_kb_btn.click(load_knowledge, inputs=[kb_collection, kb_search], outputs=[kb_table])
+    add_kb_btn.click(add_knowledge_fn, inputs=[kb_collection, new_kb_text], outputs=[kb_action_status]).then(load_knowledge, inputs=[kb_collection, kb_search], outputs=[kb_table])
+    del_kb_btn.click(delete_knowledge_fn, inputs=[kb_collection, del_kb_id], outputs=[kb_action_status]).then(load_knowledge, inputs=[kb_collection, kb_search], outputs=[kb_table])
+    kb_stats_btn.click(kb_stats_fn, outputs=[kb_stats_out])
+
+    # 5. User Sidebar
+    user_select.change(fn=lambda uid: uid if uid else gr.update(), inputs=[user_select], outputs=[global_uid])
+    refresh_users_btn.click(fn=lambda: gr.update(choices=list_users(), value=None), outputs=[user_select])
 
