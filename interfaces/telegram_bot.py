@@ -1,16 +1,15 @@
 """
 Telegram Bot Interface — connects Telegram to the Agno agent team.
 
-Handles commands, messages, and routes everything to the coordinator.
-Includes a guided onboarding flow for new users via inline keyboards.
-State is tracked in context.user_data to avoid ConversationHandler
-state-persistence pitfalls.
+Onboarding and Preferences menus use inline keyboards with state stored
+in context.user_data (no ConversationHandler dependency).
 """
 
 import asyncio
 import logging
 import sqlite3
 import uuid
+from datetime import datetime
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -24,6 +23,7 @@ from telegram.ext import (
 
 from config import TELEGRAM_BOT_TOKEN, SQLITE_DB
 from agents.coordinator import create_health_team
+from knowledge import get_knowledge_base
 from tools.profile_tools import (
     update_user_profile,
     add_food_preference,
@@ -39,21 +39,24 @@ logger = logging.getLogger(__name__)
 _team = None
 _user_sessions: dict[str, str] = {}
 
+# ══════════════════════════════════════════════════════
+# CONSTANTS
+# ══════════════════════════════════════════════════════
+
 # ── Onboarding step keys (stored in context.user_data) ─
-_ONB_STEP   = "onb_step"   # current step name
-_ONB_DATA   = "onb_data"   # collected values dict
+_ONB_STEP = "onb_step"
+_ONB_DATA = "onb_data"
 
-# Step names
-_STEP_WELCOME  = "welcome"
-_STEP_GENDER   = "gender"
-_STEP_AGE      = "age"
-_STEP_HEIGHT   = "height"
-_STEP_WEIGHT   = "weight"
-_STEP_ACTIVITY = "activity"
-_STEP_GOAL     = "goal"
-_STEP_ALLERGIES = "allergies"
+_STEP_WELCOME     = "welcome"
+_STEP_GENDER      = "gender"
+_STEP_AGE         = "age"
+_STEP_HEIGHT      = "height"
+_STEP_WEIGHT      = "weight"
+_STEP_ACTIVITY    = "activity"
+_STEP_GOAL        = "goal"
+_STEP_GOAL_WEIGHT = "goal_weight"
+_STEP_ALLERGIES   = "allergies"
 
-# ── Onboarding option labels ───────────────────────────
 _ACTIVITY_OPTIONS = [
     ("sedentary",   "🛋️ Sedentário"),
     ("light",       "🚶 Ligeiro"),
@@ -64,16 +67,32 @@ _ACTIVITY_OPTIONS = [
 _ACTIVITY_LABEL = {k: v for k, v in _ACTIVITY_OPTIONS}
 
 _GOAL_OPTIONS = [
-    ("lose_weight",    "⬇️ Perder peso"),
-    ("gain_muscle",    "💪 Ganhar massa muscular"),
-    ("maintain",       "⚖️ Manter peso"),
-    ("improve_health", "❤️ Melhorar saúde geral"),
+    ("lose_visceral",   "🔥 Perder gordura visceral"),
+    ("lose_weight",     "⬇️ Perder peso"),
+    ("target_weight",   "🎯 Atingir peso específico"),
+    ("gain_muscle",     "💪 Ganhar massa muscular"),
+    ("maintain",        "⚖️ Manter peso actual"),
+    ("improve_fitness", "🏃 Melhorar condição física"),
+    ("improve_health",  "❤️ Melhorar saúde geral"),
+    ("better_diet",     "🍽️ Melhores hábitos alimentares"),
 ]
 _GOAL_LABEL = {k: v for k, v in _GOAL_OPTIONS}
 
 _ALLERGY_OPTIONS = ["Glúten", "Lactose", "Frutos secos", "Marisco", "Ovos", "Amendoins"]
 
-_AGE_MIDPOINTS = {"18-25": 22, "26-35": 30, "36-45": 40, "46-55": 50, "56+": 60}
+# ── Preferences menu ───────────────────────────────────
+_PREF_CATEGORIES = [
+    ("food_likes",   "👍 Gostos alimentares"),
+    ("food_dislikes","👎 Não gostos"),
+    ("allergies",    "⚠️ Alergias e intolerâncias"),
+    ("restrictions", "🚫 Restrições alimentares"),
+    ("goals",        "🎯 Objectivos de saúde"),
+]
+_PREF_LABEL = {k: v for k, v in _PREF_CATEGORIES}
+
+_PREFS_STATE = "prefs_state"
+_PREFS_ITEMS = "prefs_items"
+_PREFS_SEL   = "prefs_selected"
 
 
 # ══════════════════════════════════════════════════════
@@ -110,12 +129,10 @@ def _uname(update: Update) -> str:
 
 
 def _is_profile_complete(uid: str) -> bool:
-    """True if core profile fields (age, gender, weight) are filled."""
     try:
         conn = sqlite3.connect(str(SQLITE_DB))
         row = conn.execute(
-            "SELECT age, gender, weight_kg FROM user_profiles WHERE user_id = ?",
-            (uid,),
+            "SELECT age, gender, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
         ).fetchone()
         conn.close()
         return bool(row and row[0] and row[1] and row[2])
@@ -149,15 +166,6 @@ def _gender_keyboard() -> InlineKeyboardMarkup:
     ]])
 
 
-def _age_keyboard() -> InlineKeyboardMarkup:
-    ages = list(_AGE_MIDPOINTS.keys())
-    rows = [
-        [InlineKeyboardButton(a, callback_data=f"ob_age:{a}") for a in ages[:3]],
-        [InlineKeyboardButton(a, callback_data=f"ob_age:{a}") for a in ages[3:]],
-    ]
-    return InlineKeyboardMarkup(rows)
-
-
 def _skip_keyboard(cb: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("⏭️ Saltar", callback_data=cb),
@@ -165,11 +173,10 @@ def _skip_keyboard(cb: str) -> InlineKeyboardMarkup:
 
 
 def _activity_keyboard() -> InlineKeyboardMarkup:
-    rows = [
+    return InlineKeyboardMarkup([
         [InlineKeyboardButton(label, callback_data=f"ob_activity:{key}")]
         for key, label in _ACTIVITY_OPTIONS
-    ]
-    return InlineKeyboardMarkup(rows)
+    ])
 
 
 def _goal_keyboard() -> InlineKeyboardMarkup:
@@ -201,16 +208,106 @@ def _allergy_keyboard(selected: set) -> InlineKeyboardMarkup:
 
 
 # ══════════════════════════════════════════════════════
+# PREFERENCES — DATA HELPERS
+# ══════════════════════════════════════════════════════
+
+def _load_prefs_items(uid: str, cat: str) -> list[dict]:
+    """Load items for a preference category from ChromaDB."""
+    kb = get_knowledge_base()
+    try:
+        data = kb.preferences.get(
+            where={"$and": [{"user_id": uid}, {"category": cat}]}
+        )
+        if data and data.get("ids"):
+            return [
+                {"id": data["ids"][i], "text": data["documents"][i]}
+                for i in range(len(data["ids"]))
+            ]
+    except Exception as exc:
+        logger.warning("_load_prefs_items uid=%s cat=%s: %s", uid, cat, exc)
+    return []
+
+
+def _delete_prefs_by_ids(ids: list[str]) -> int:
+    kb = get_knowledge_base()
+    try:
+        kb.preferences.delete(ids=ids)
+        return len(ids)
+    except Exception as exc:
+        logger.warning("_delete_prefs_by_ids: %s", exc)
+        return 0
+
+
+def _add_pref_item(uid: str, cat: str, text: str):
+    """Add an item to the appropriate preference category."""
+    if cat == "food_likes":
+        add_food_preference(uid, text, likes=True)
+    elif cat == "food_dislikes":
+        add_food_preference(uid, text, likes=False)
+    elif cat == "allergies":
+        add_allergy(uid, text)
+    elif cat == "goals":
+        add_health_goal(uid, text)
+    else:
+        kb = get_knowledge_base()
+        kb.add_preference(uid, cat, text, {"created": datetime.now().isoformat()})
+
+
+def _format_pref_items(items: list, cat_label: str) -> str:
+    if not items:
+        return f"*{cat_label}*\n\n_Nenhum item registado._"
+    n = len(items)
+    lines = [f"*{cat_label}* ({n} item{'s' if n != 1 else ''})\n"]
+    lines += [f"• {item['text']}" for item in items]
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════
+# PREFERENCES — KEYBOARD BUILDERS
+# ══════════════════════════════════════════════════════
+
+def _prefs_main_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"prefs_cat:{cat}")]
+        for cat, label in _PREF_CATEGORIES
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def _prefs_view_keyboard(cat: str, has_items: bool) -> InlineKeyboardMarkup:
+    rows = [[InlineKeyboardButton("➕ Adicionar", callback_data=f"prefs_add:{cat}")]]
+    if has_items:
+        rows.append([InlineKeyboardButton("🗑️ Remover itens", callback_data=f"prefs_remove_mode:{cat}")])
+    rows.append([InlineKeyboardButton("◀️ Voltar", callback_data="prefs_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _prefs_remove_keyboard(items: list, selected: set, cat: str) -> InlineKeyboardMarkup:
+    rows = []
+    for i, item in enumerate(items):
+        label = f"✅ {item['text'][:38]}" if i in selected else item['text'][:38]
+        rows.append([InlineKeyboardButton(label, callback_data=f"prefs_toggle:{i}")])
+    action_row = []
+    if selected:
+        action_row.append(InlineKeyboardButton(
+            f"🗑️ Remover ({len(selected)})",
+            callback_data=f"prefs_confirm_remove:{cat}",
+        ))
+    action_row.append(InlineKeyboardButton("❌ Cancelar", callback_data=f"prefs_cat:{cat}"))
+    rows.append(action_row)
+    return InlineKeyboardMarkup(rows)
+
+
+# ══════════════════════════════════════════════════════
 # ONBOARDING — ENTRY POINT  (/start)
 # ══════════════════════════════════════════════════════
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid, name = _uid(update), _uname(update)
-
     try:
         update_user_profile(uid, name=name)
     except Exception as exc:
-        logger.warning("cmd_start: could not upsert profile for %s: %s", uid, exc)
+        logger.warning("cmd_start: upsert failed for %s: %s", uid, exc)
 
     if _is_profile_complete(uid):
         _onb_clear(context)
@@ -219,13 +316,11 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A tua equipa de saúde está pronta:\n"
             f"🥗 *Nutricionista* · 🏋️ *Trainer* · 👨‍🍳 *Chef*\n\n"
             f"Basta enviares uma mensagem ou usar:\n"
-            f"/perfil — Ver perfil · /peso — Registar peso\n"
-            f"/objectivo — Definir objetivo · /reset — Nova conversa",
+            f"/perfil · /peso · /objectivo · /preferencias · /reset",
             parse_mode="Markdown",
         )
         return
 
-    # New / incomplete profile → start onboarding
     context.user_data[_ONB_STEP] = _STEP_WELCOME
     context.user_data[_ONB_DATA] = {}
 
@@ -249,16 +344,13 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════
 
 async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Single handler for all ob_* callback queries — dispatches by step + data."""
+    """Single handler for all ob_* callback queries."""
     query = update.callback_query
     await query.answer()
+    data  = query.data
+    step  = _onb_step(context)
 
-    data = query.data
-    step = _onb_step(context)
-
-    logger.debug("onboarding callback: step=%s data=%s", step, data)
-
-    # ── ob_skip: abandon onboarding at any point ──────
+    # ── ob_skip ───────────────────────────────────────
     if data == "ob_skip":
         _onb_clear(context)
         await query.edit_message_text(
@@ -267,7 +359,7 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    # ── ob_start: welcome → gender ────────────────────
+    # ── ob_start ──────────────────────────────────────
     if data == "ob_start":
         context.user_data[_ONB_STEP] = _STEP_GENDER
         await query.edit_message_text(
@@ -279,21 +371,18 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
 
     # ── ob_gender:* ───────────────────────────────────
     if data.startswith("ob_gender:") and step == _STEP_GENDER:
-        gender = "male" if data.endswith(":M") else "female"
-        _onb_data(context)["gender"] = gender
+        _onb_data(context)["gender"] = "male" if data.endswith(":M") else "female"
         context.user_data[_ONB_STEP] = _STEP_AGE
         await query.edit_message_text(
-            "*Passo 1 de 4 — Dados pessoais* 👤\n\nQual é a tua faixa etária?",
-            reply_markup=_age_keyboard(),
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
+            "Qual é a tua idade? _(em anos, ex: 35)_",
+            reply_markup=_skip_keyboard("ob_age_skip"),
             parse_mode="Markdown",
         )
         return
 
-    # ── ob_age:* ──────────────────────────────────────
-    if data.startswith("ob_age:") and step == _STEP_AGE:
-        age_range = data.split(":", 1)[1]
-        _onb_data(context)["age"] = _AGE_MIDPOINTS.get(age_range, 35)
-        _onb_data(context)["age_label"] = age_range
+    # ── ob_age_skip ───────────────────────────────────
+    if data == "ob_age_skip":
         context.user_data[_ONB_STEP] = _STEP_HEIGHT
         await query.edit_message_text(
             "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
@@ -327,8 +416,7 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
 
     # ── ob_activity:* ─────────────────────────────────
     if data.startswith("ob_activity:") and step == _STEP_ACTIVITY:
-        activity = data.split(":", 1)[1]
-        _onb_data(context)["activity_level"] = activity
+        _onb_data(context)["activity_level"] = data.split(":", 1)[1]
         context.user_data[_ONB_STEP] = _STEP_GOAL
         await query.edit_message_text(
             "*Passo 3 de 4 — Objectivo* 🎯\n\n"
@@ -341,7 +429,30 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
     # ── ob_goal:* ─────────────────────────────────────
     if data.startswith("ob_goal:") and step == _STEP_GOAL:
         goal_key = data.split(":", 1)[1]
+        if goal_key == "target_weight":
+            context.user_data[_ONB_STEP] = _STEP_GOAL_WEIGHT
+            await query.edit_message_text(
+                "*Passo 3 de 4 — Objectivo* 🎯\n\n"
+                "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+                reply_markup=_skip_keyboard("ob_goal_weight_skip"),
+                parse_mode="Markdown",
+            )
+            return
         _onb_data(context)["goal"] = _GOAL_LABEL.get(goal_key, goal_key)
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await query.edit_message_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── ob_goal_weight_skip ───────────────────────────
+    if data == "ob_goal_weight_skip":
+        _onb_data(context)["goal"] = "Atingir peso específico"
         context.user_data[_ONB_STEP] = _STEP_ALLERGIES
         _onb_data(context).setdefault("allergies", set())
         await query.edit_message_text(
@@ -355,8 +466,8 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
 
     # ── ob_allergy:* (toggle) ─────────────────────────
     if data.startswith("ob_allergy:") and step == _STEP_ALLERGIES:
-        item = data.split(":", 1)[1]
-        selected: set = _onb_data(context).get("allergies", set())
+        item     = data.split(":", 1)[1]
+        selected = _onb_data(context).get("allergies", set())
         if item == "nenhuma":
             selected = {"nenhuma"} if "nenhuma" not in selected else set()
         else:
@@ -377,14 +488,10 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
         await _finish_onboarding(query, update, context)
         return
 
-    # Stale or out-of-order callback — silently ignore
-    logger.debug("Ignored stale onboarding callback: step=%s data=%s", step, data)
-
 
 async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Save all collected onboarding data and show the summary."""
     uid = _uid(update)
-    d = _onb_data(context)
+    d   = _onb_data(context)
 
     try:
         update_user_profile(
@@ -397,56 +504,74 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
             goal=d.get("goal"),
         )
     except Exception as exc:
-        logger.error("finish_onboarding: could not save profile for %s: %s", uid, exc)
+        logger.error("finish_onboarding: profile save failed for %s: %s", uid, exc)
 
     allergies = {a for a in d.get("allergies", set()) if a != "nenhuma"}
     for allergy in allergies:
         try:
             add_allergy(uid, allergy)
         except Exception as exc:
-            logger.warning("finish_onboarding: could not save allergy %s: %s", allergy, exc)
+            logger.warning("finish_onboarding: allergy save failed: %s", exc)
 
     if d.get("goal"):
         try:
             add_health_goal(uid, d["goal"])
         except Exception as exc:
-            logger.warning("finish_onboarding: could not save goal: %s", exc)
+            logger.warning("finish_onboarding: goal save failed: %s", exc)
 
-    # Summary
-    gender_icon = "👨" if d.get("gender") == "male" else "👩"
+    gender_icon  = "👨" if d.get("gender") == "male" else "👩"
     gender_label = "Masculino" if d.get("gender") == "male" else "Feminino"
-    height_str = f"{d['height_cm']:.0f} cm" if d.get("height_cm") else "—"
-    weight_str = f"{d['weight_kg']:.1f} kg" if d.get("weight_kg") else "—"
-    allergy_str = ", ".join(sorted(allergies)) if allergies else "Nenhuma"
+    height_str   = f"{d['height_cm']:.0f} cm" if d.get("height_cm") else "—"
+    weight_str   = f"{d['weight_kg']:.1f} kg"  if d.get("weight_kg") else "—"
+    allergy_str  = ", ".join(sorted(allergies)) if allergies else "Nenhuma"
     activity_label = _ACTIVITY_LABEL.get(d.get("activity_level", ""), "—")
 
     summary = (
         f"✅ *Perfil criado com sucesso!*\n\n"
         f"{gender_icon} Género: {gender_label}\n"
-        f"🎂 Idade: {d.get('age_label', '—')}\n"
+        f"🎂 Idade: {d.get('age', '—')}\n"
         f"📏 Altura: {height_str}\n"
         f"⚖️ Peso: {weight_str}\n"
         f"🏃 Actividade: {activity_label}\n"
         f"🎯 Objectivo: {d.get('goal', '—')}\n"
         f"⚠️ Alergias: {allergy_str}\n\n"
         f"A tua equipa já conhece o teu perfil! Começa a conversar 💬\n"
-        f"_Podes ver o teu perfil completo com_ /perfil"
+        f"_Edita preferências a qualquer altura com_ /preferencias"
     )
-
     _onb_clear(context)
     await query.edit_message_text(summary, parse_mode="Markdown")
 
 
 # ══════════════════════════════════════════════════════
-# ONBOARDING — TEXT INPUT HANDLER (height / weight)
+# ONBOARDING — TEXT INPUT HANDLER (age / height / weight / goal_weight)
 # ══════════════════════════════════════════════════════
 
 async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """
-    Handle text input for height/weight steps.
-    Returns True if the message was consumed by onboarding, False otherwise.
-    """
+    """Consume height/weight/age text during onboarding. Returns True if consumed."""
     step = _onb_step(context)
+
+    if step == _STEP_AGE:
+        text = update.message.text.strip()
+        try:
+            age = int(float(text.replace(",", ".")))
+            if not (10 <= age <= 120):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Idade inválida. Insere um número entre 10 e 120 _(ex: 35)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+        _onb_data(context)["age"] = age
+        context.user_data[_ONB_STEP] = _STEP_HEIGHT
+        await update.message.reply_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
+            "Qual é a tua altura? _(em cm, ex: 175)_",
+            reply_markup=_skip_keyboard("ob_height_skip"),
+            parse_mode="Markdown",
+        )
+        return True
 
     if step == _STEP_HEIGHT:
         text = update.message.text.strip().replace(",", ".")
@@ -461,7 +586,6 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
             return True
-
         _onb_data(context)["height_cm"] = height
         context.user_data[_ONB_STEP] = _STEP_WEIGHT
         await update.message.reply_text(
@@ -485,7 +609,6 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
             return True
-
         _onb_data(context)["weight_kg"] = weight
         context.user_data[_ONB_STEP] = _STEP_ACTIVITY
         await update.message.reply_text(
@@ -496,14 +619,192 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
         )
         return True
 
+    if step == _STEP_GOAL_WEIGHT:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            target = float(text)
+            if not (30 <= target <= 300):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 75)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+        _onb_data(context)["goal"] = f"Atingir {target:.1f} kg"
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await update.message.reply_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return True
+
     return False
+
+
+# ══════════════════════════════════════════════════════
+# PREFERENCES MENU — /preferencias
+# ══════════════════════════════════════════════════════
+
+async def cmd_preferencias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show the preferences category menu."""
+    context.user_data.pop(_PREFS_STATE, None)
+    context.user_data.pop(_PREFS_ITEMS, None)
+    context.user_data.pop(_PREFS_SEL, None)
+    await update.message.reply_text(
+        "⚙️ *Preferências e objectivos*\n\nEscolhe uma categoria para editar:",
+        reply_markup=_prefs_main_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_prefs_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Single handler for all prefs_* callback queries."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    uid  = _uid(update)
+
+    # ── prefs_back → main menu ────────────────────────
+    if data == "prefs_back":
+        context.user_data.pop(_PREFS_STATE, None)
+        context.user_data.pop(_PREFS_ITEMS, None)
+        context.user_data.pop(_PREFS_SEL, None)
+        await query.edit_message_text(
+            "⚙️ *Preferências e objectivos*\n\nEscolhe uma categoria para editar:",
+            reply_markup=_prefs_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── prefs_cat:{cat} → view category ──────────────
+    if data.startswith("prefs_cat:"):
+        cat   = data.split(":", 1)[1]
+        items = _load_prefs_items(uid, cat)
+        context.user_data[_PREFS_STATE] = f"view:{cat}"
+        context.user_data[_PREFS_ITEMS] = items
+        context.user_data[_PREFS_SEL]   = set()
+        cat_label = _PREF_LABEL.get(cat, cat)
+        await query.edit_message_text(
+            _format_pref_items(items, cat_label),
+            reply_markup=_prefs_view_keyboard(cat, bool(items)),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── prefs_add:{cat} → prompt for text ────────────
+    if data.startswith("prefs_add:"):
+        cat       = data.split(":", 1)[1]
+        cat_label = _PREF_LABEL.get(cat, cat)
+        context.user_data[_PREFS_STATE] = f"adding:{cat}"
+        await query.edit_message_text(
+            f"*{cat_label}* — Adicionar\n\nEscreve o item a adicionar:",
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton("❌ Cancelar", callback_data=f"prefs_cat:{cat}"),
+            ]]),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── prefs_remove_mode:{cat} → toggle keyboard ────
+    if data.startswith("prefs_remove_mode:"):
+        cat   = data.split(":", 1)[1]
+        items = _load_prefs_items(uid, cat)
+        context.user_data[_PREFS_ITEMS] = items
+        context.user_data[_PREFS_SEL]   = set()
+        context.user_data[_PREFS_STATE] = f"removing:{cat}"
+        cat_label = _PREF_LABEL.get(cat, cat)
+        await query.edit_message_text(
+            f"*{cat_label}* — Selecciona os itens a remover:",
+            reply_markup=_prefs_remove_keyboard(items, set(), cat),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── prefs_toggle:{index} → toggle selection ──────
+    if data.startswith("prefs_toggle:"):
+        idx      = int(data.split(":", 1)[1])
+        selected = context.user_data.get(_PREFS_SEL, set())
+        items    = context.user_data.get(_PREFS_ITEMS, [])
+        state    = context.user_data.get(_PREFS_STATE, "")
+        cat      = state.split(":", 1)[1] if ":" in state else ""
+        selected.discard(idx) if idx in selected else selected.add(idx)
+        context.user_data[_PREFS_SEL] = selected
+        cat_label = _PREF_LABEL.get(cat, cat)
+        await query.edit_message_text(
+            f"*{cat_label}* — Selecciona os itens a remover:",
+            reply_markup=_prefs_remove_keyboard(items, selected, cat),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── prefs_confirm_remove:{cat} → delete selected ─
+    if data.startswith("prefs_confirm_remove:"):
+        cat      = data.split(":", 1)[1]
+        selected = context.user_data.get(_PREFS_SEL, set())
+        items    = context.user_data.get(_PREFS_ITEMS, [])
+        ids_to_delete = [items[i]["id"] for i in sorted(selected) if i < len(items)]
+        n_deleted = _delete_prefs_by_ids(ids_to_delete)
+        # Reload and show updated list
+        updated  = _load_prefs_items(uid, cat)
+        context.user_data[_PREFS_ITEMS] = updated
+        context.user_data[_PREFS_SEL]   = set()
+        context.user_data[_PREFS_STATE] = f"view:{cat}"
+        cat_label = _PREF_LABEL.get(cat, cat)
+        await query.edit_message_text(
+            f"✅ {n_deleted} item(s) removido(s).\n\n"
+            + _format_pref_items(updated, cat_label),
+            reply_markup=_prefs_view_keyboard(cat, bool(updated)),
+            parse_mode="Markdown",
+        )
+        return
+
+
+async def _handle_prefs_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Handle text input when in prefs 'adding' state. Returns True if consumed."""
+    state = context.user_data.get(_PREFS_STATE, "")
+    if not state.startswith("adding:"):
+        return False
+
+    cat       = state.split(":", 1)[1]
+    cat_label = _PREF_LABEL.get(cat, cat)
+    text      = update.message.text.strip()
+    uid       = _uid(update)
+
+    if not text:
+        return True
+
+    try:
+        _add_pref_item(uid, cat, text)
+    except Exception as exc:
+        logger.error("_handle_prefs_text: add failed: %s", exc)
+        await update.message.reply_text("❌ Erro ao adicionar. Tenta novamente.")
+        return True
+
+    items = _load_prefs_items(uid, cat)
+    context.user_data[_PREFS_STATE] = f"view:{cat}"
+    context.user_data[_PREFS_ITEMS] = items
+    context.user_data[_PREFS_SEL]   = set()
+
+    await update.message.reply_text(
+        f"✅ _{text}_ adicionado a *{cat_label}*.\n\n"
+        + _format_pref_items(items, cat_label),
+        reply_markup=_prefs_view_keyboard(cat, bool(items)),
+        parse_mode="Markdown",
+    )
+    return True
 
 
 # ══════════════════════════════════════════════════════
 # REGULAR COMMAND HANDLERS
 # ══════════════════════════════════════════════════════
 
-async def cmd_perfil(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_perfil(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_user_profile(_uid(update)))
 
 
@@ -511,7 +812,7 @@ async def cmd_objectivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else ""
     if not text:
         await update.message.reply_text(
-            "❓ Exemplo: `/objectivo Perder 5kg em 3 meses`\n_Define o teu objetivo de saúde._",
+            "❓ Exemplo: `/objectivo Perder 5kg em 3 meses`",
             parse_mode="Markdown",
         )
         return
@@ -522,9 +823,7 @@ async def cmd_objectivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     food = " ".join(context.args) if context.args else ""
     if not food:
-        await update.message.reply_text(
-            "❓ Exemplo: `/gosto salmão`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❓ Exemplo: `/gosto salmão`", parse_mode="Markdown")
         return
     result = add_food_preference(_uid(update), food, likes=True)
     await update.message.reply_text(result, parse_mode="Markdown")
@@ -533,9 +832,7 @@ async def cmd_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_nao_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
     food = " ".join(context.args) if context.args else ""
     if not food:
-        await update.message.reply_text(
-            "❓ Exemplo: `/nao_gosto beterraba`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❓ Exemplo: `/nao_gosto beterraba`", parse_mode="Markdown")
         return
     result = add_food_preference(_uid(update), food, likes=False)
     await update.message.reply_text(result, parse_mode="Markdown")
@@ -543,16 +840,13 @@ async def cmd_nao_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_peso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text(
-            "❓ Exemplo: `/peso 78.5`", parse_mode="Markdown"
-        )
+        await update.message.reply_text("❓ Exemplo: `/peso 78.5`", parse_mode="Markdown")
         return
     try:
         weight = float(context.args[0].replace(",", "."))
     except ValueError:
         await update.message.reply_text("❌ Peso inválido. Usa um número (ex: 78.5)")
         return
-
     update_user_profile(_uid(update), weight_kg=weight)
     await update.message.reply_text(
         f"⚖️ Peso registado: *{weight} kg*\nUsa /historico para ver evolução.",
@@ -560,17 +854,17 @@ async def cmd_peso(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-async def cmd_historico(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_historico(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_weight_history(_uid(update)))
 
 
-async def cmd_reset(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_reset(update: Update, _: ContextTypes.DEFAULT_TYPE):
     _reset_session(_uid(update))
     await update.message.reply_text("🔄 Conversa reiniciada.")
 
 
 # ══════════════════════════════════════════════════════
-# MESSAGE HANDLER — routes to the agent team
+# MESSAGE HANDLER
 # ══════════════════════════════════════════════════════
 
 def _infer_specialist_from_tracker(tracker) -> str:
@@ -611,23 +905,22 @@ def _user_error_message(exc: Exception) -> str:
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main handler for text messages. Checks onboarding state first."""
+    """Routes text messages: onboarding → prefs → agent team."""
     from xai import get_tracker
 
-    # Let onboarding consume height/weight text input if applicable
     if await _handle_onboarding_text(update, context):
         return
+    if await _handle_prefs_text(update, context):
+        return
 
-    uid = _uid(update)
+    uid  = _uid(update)
     name = _uname(update)
-    msg = update.message.text
-
+    msg  = update.message.text
     if not msg:
         return
 
     tracker = get_tracker()
     tracker.reset(msg)
-
     logger.info("[%s] %s: %s", uid, name, msg[:80])
 
     enriched = f"[User: {name}, ID: {uid}]\n{msg}"
@@ -642,26 +935,23 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await asyncio.sleep(4)
 
         typing_task = asyncio.create_task(_keep_typing())
-
         try:
             response = await team.arun(enriched, session_id=session_id, user_id=uid)
         finally:
             typing_task.cancel()
 
         response_text = _extract_text(response)
-
         if not response_text:
             response_text = "Desculpa, não consegui processar. Tenta reformular. 🤔"
         else:
             response_text = _sanitize_response(response_text)
 
-        specialist = _infer_specialist_from_tracker(tracker)
+        specialist   = _infer_specialist_from_tracker(tracker)
         tools_called = [tc.name for tc in tracker._tool_calls]
-        rag_hits = [(rq.collection, rq.query, rq.hits) for rq in tracker._rag_queries]
+        rag_hits     = [(rq.collection, rq.query, rq.hits) for rq in tracker._rag_queries]
         logger.info("[XAI] specialist=%-25s tools=%s", specialist, tools_called)
-        if rag_hits:
-            for col, q, hits in rag_hits:
-                logger.info("[XAI] rag_summary  collection=%-20s hits=%-3d query=%r", col, hits, q[:40])
+        for col, q, hits in rag_hits:
+            logger.info("[XAI] rag  collection=%-20s hits=%-3d query=%r", col, hits, q[:40])
 
         await _send_long(update, response_text)
 
@@ -700,7 +990,6 @@ async def _send_long(update: Update, text: str, max_len: int = 4000):
         except Exception:
             await update.message.reply_text(text)
         return
-
     parts = []
     while text:
         if len(text) <= max_len:
@@ -713,7 +1002,6 @@ async def _send_long(update: Update, text: str, max_len: int = 4000):
             cut = max_len
         parts.append(text[: cut + 1])
         text = text[cut + 1:]
-
     for part in parts:
         try:
             await update.message.reply_text(part.strip(), parse_mode="Markdown")
@@ -745,23 +1033,24 @@ def create_telegram_app() -> Application:
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # ── Onboarding inline-keyboard handler (highest priority) ──
+    # Inline keyboard callbacks (highest priority)
     app.add_handler(CallbackQueryHandler(handle_onboarding_callback, pattern="^ob_"))
+    app.add_handler(CallbackQueryHandler(handle_prefs_callback,      pattern="^prefs_"))
 
-    # ── Command handlers ───────────────────────────────
-    app.add_handler(CommandHandler("start",      cmd_start))
-    app.add_handler(CommandHandler("perfil",     cmd_perfil))
-    app.add_handler(CommandHandler("objectivo",  cmd_objectivo))
-    app.add_handler(CommandHandler("gosto",      cmd_gosto))
-    app.add_handler(CommandHandler("nao_gosto",  cmd_nao_gosto))
-    app.add_handler(CommandHandler("peso",       cmd_peso))
-    app.add_handler(CommandHandler("historico",  cmd_historico))
-    app.add_handler(CommandHandler("reset",      cmd_reset))
+    # Commands
+    app.add_handler(CommandHandler("start",         cmd_start))
+    app.add_handler(CommandHandler("perfil",        cmd_perfil))
+    app.add_handler(CommandHandler("preferencias",  cmd_preferencias))
+    app.add_handler(CommandHandler("objectivo",     cmd_objectivo))
+    app.add_handler(CommandHandler("gosto",         cmd_gosto))
+    app.add_handler(CommandHandler("nao_gosto",     cmd_nao_gosto))
+    app.add_handler(CommandHandler("peso",          cmd_peso))
+    app.add_handler(CommandHandler("historico",     cmd_historico))
+    app.add_handler(CommandHandler("reset",         cmd_reset))
 
-    # ── Free-text message handler ──────────────────────
+    # Free-text
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.add_error_handler(error_handler)
-
     logger.info("✅ Telegram app configured.")
     return app
