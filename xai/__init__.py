@@ -36,9 +36,9 @@ TOOL_DISPLAY_NAMES: dict[str, str] = {
     "search_workout_plans":         "Planos de Treino (RAG)",
     "estimate_calories_burned":     "Estimativa de Calorias — Fórmula MET",
     "get_user_profile":             "Consulta do Perfil do Utilizador",
-    "update_user_profile":          "Actualização do Perfil",
+    "update_user_profile":          "Atualização do Perfil",
     "add_food_preference":          "Registo de Preferência Alimentar",
-    "add_health_goal":              "Registo de Objectivo de Saúde",
+    "add_health_goal":              "Registo de Objetivo de Saúde",
     "get_weight_history":           "Consulta do Histórico de Peso",
 }
 
@@ -48,9 +48,9 @@ TOOL_FORMULA_NOTES: dict[str, str] = {
         "**Fórmula Mifflin-St Jeor:**\n"
         "- Homem:  BMR = 10×peso + 6.25×altura − 5×idade + 5\n"
         "- Mulher: BMR = 10×peso + 6.25×altura − 5×idade − 161\n"
-        "- TDEE = BMR × multiplicador de actividade\n"
+        "- TDEE = BMR × multiplicador de atividade\n"
         "  (sedentário=1.2 · leve=1.375 · moderado=1.55 · activo=1.725 · muito activo=1.9)\n"
-        "- Meta = TDEE ± ajuste do objectivo\n"
+        "- Meta = TDEE ± ajuste do objetivo\n"
         "  (perder peso=−400 kcal · manter=0 · ganhar massa=+300 kcal)"
     ),
     "estimate_calories_burned": (
@@ -154,7 +154,7 @@ class ExplainabilityTracker:
             return (
                 "_Nenhuma análise disponível ainda._\n\n"
                 "Envia uma mensagem no tab **💬 Chat** e depois clica em "
-                "**🔄 Actualizar Análise** para ver a explicação."
+                "**🔄 Atualizar Análise** para ver a explicação."
             )
 
         specialist = _infer_specialist({tc.name for tc in self._tool_calls})

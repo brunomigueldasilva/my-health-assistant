@@ -7,7 +7,7 @@ Initializes the knowledge base and starts the Telegram bot + Gradio Web UI.
 Usage — set LLM_PROVIDER in .env, then:
 
     Ollama (local, free):
-        ollama pull qwen3:8b   # first time only
+        ollama pull qwen2.5:32b   # first time only
         python main.py
         
     LM Studio (local, free):
@@ -54,7 +54,7 @@ from config import (
 from knowledge import get_knowledge_base
 from knowledge.seed_data import seed_all
 from interfaces.telegram_bot import create_telegram_app
-from interfaces.gradio_app import demo as gradio_demo
+from interfaces.gradio_app import demo as gradio_demo, _CSS as gradio_css
 
 # ── Logging constants ───────────────────────────────────
 _LOG_DIR = Path("logs")
@@ -238,6 +238,7 @@ def main() -> None:
         share=False,
         prevent_thread_lock=True,
         theme=gr.themes.Soft(primary_hue="emerald", secondary_hue="teal"),
+        css=gradio_css,
     )
     logger.info("✅ Gradio UI available at http://localhost:7860")
 

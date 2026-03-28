@@ -1,4 +1,4 @@
-# Personal Health Assistant — Agno + Multi-Provider LLM + Telegram + Gradio
+# Personal Health Assistant — Agno + LLM + Telegram + Gradio
 
 A multi-agent personal health assistant with RAG, powered by the Agno framework.
 Supports **5 LLM providers** — Ollama, Gemini, OpenAI, Anthropic (Claude), and LM Studio —
@@ -23,6 +23,13 @@ with two interfaces: Telegram Bot and Gradio Web UI.
 ## Setup
 
 ### 1. Choose your LLM provider
+
+> **Recommended local model: `qwen2.5:32b`** (Ollama and LM Studio)
+> This is the best-performing model for this project — it has no thinking overhead, reliably
+> follows agent instructions, and consistently invokes tools (function calling).
+> Requires a GPU with at least 32 GB VRAM (e.g. NVIDIA RTX 5090 or equivalent).
+> On 24 GB VRAM (e.g. RTX 4090) the model loads but leaves little room for the KV cache,
+> which may result in slower responses or inconsistent tool calling.
 
 #### Option A — Ollama (local, free)
 
@@ -56,7 +63,23 @@ LLM_PROVIDER=ollama
 OLLAMA_MODEL=qwen2.5:32b
 ```
 
-#### Option B — Gemini API (Google)
+#### Option B — LM Studio (local, free)
+
+1. Download [LM Studio](https://lmstudio.ai/) and install it
+2. Download `qwen2.5:32b` (or any model) inside LM Studio
+3. Go to **Local Server** tab and click **Start Server**
+4. Copy the model identifier shown in the UI
+
+Set in `.env`:
+```env
+LLM_PROVIDER=lmstudio
+LMSTUDIO_HOST=http://localhost:1234/v1
+LMSTUDIO_MODEL=qwen2.5-32b-instruct   # use the exact model ID shown in LM Studio
+```
+
+LM Studio exposes an OpenAI-compatible API — no API key required.
+
+#### Option C — Gemini API (Google)
 
 Get an API key from [Google AI Studio](https://aistudio.google.com/).
 
@@ -67,7 +90,7 @@ GOOGLE_API_KEY=AIza...
 GEMINI_MODEL=gemini-2.5-flash
 ```
 
-#### Option C — OpenAI API (GPT-4, GPT-3.5, etc.)
+#### Option D — OpenAI API (GPT-4, GPT-3.5, etc.)
 
 Get an API key from [platform.openai.com](https://platform.openai.com/).
 
@@ -78,7 +101,7 @@ OPENAI_API_KEY=sk-...
 OPENAI_MODEL=gpt-4o-mini
 ```
 
-#### Option D — Anthropic API (Claude)
+#### Option E — Anthropic API (Claude)
 
 Get an API key from [console.anthropic.com](https://console.anthropic.com/).
 
@@ -88,22 +111,6 @@ LLM_PROVIDER=anthropic
 ANTHROPIC_API_KEY=sk-ant-...
 ANTHROPIC_MODEL=claude-sonnet-4-6
 ```
-
-#### Option E — LM Studio (local, free)
-
-1. Download [LM Studio](https://lmstudio.ai/) and install it
-2. Download any model inside LM Studio
-3. Go to **Local Server** tab and click **Start Server**
-4. Copy the model identifier shown in the UI
-
-Set in `.env`:
-```env
-LLM_PROVIDER=lmstudio
-LMSTUDIO_HOST=http://localhost:1234/v1
-LMSTUDIO_MODEL=meta-llama-3.1-8b-instruct   # use the exact model ID shown in LM Studio
-```
-
-LM Studio exposes an OpenAI-compatible API — no API key required.
 
 ### 2. Create a Telegram Bot
 

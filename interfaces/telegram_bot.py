@@ -86,7 +86,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Basta enviares uma mensagem!\n\n"
         f"*Comandos:*\n"
         f"/perfil — Ver perfil\n"
-        f"/objectivo <texto> — Definir objectivo\n"
+        f"/objectivo <texto> — Definir objetivo\n"
         f"/gosto <alimento> — Alimento que gostas\n"
         f"/nao\\_gosto <alimento> — Alimento que não gostas\n"
         f"/peso <kg> — Registar peso\n"
@@ -104,7 +104,7 @@ async def cmd_objectivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = " ".join(context.args) if context.args else ""
     if not text:
         await update.message.reply_text(
-            "❓ Exemplo: `/objectivo Perder 5kg em 3 meses`",
+            "❓ Exemplo: `/objectivo Perder 5kg em 3 meses`\n_Define o teu objetivo de saúde._",
             parse_mode="Markdown",
         )
         return

@@ -113,7 +113,7 @@ NUTRITION_DATA = [
     "Para ganho muscular: superávit calórico de 200-300 kcal/dia, proteína 1.8-2.2g/kg, "
     "carboidratos complexos pré e pós-treino, sono 7-9h por noite.",
     "Macros para perda de peso: 40% proteína, 30% carboidratos, 30% gordura. "
-    "Ajustar conforme resposta individual e nível de actividade.",
+    "Ajustar conforme resposta individual e nível de atividade.",
     "Macros para manutenção/desempenho: 30% proteína, 45% carboidratos, 25% gordura.",
     "Hidratação: mínimo 2L de água/dia. Adicionar 500ml por hora de exercício. "
     "A desidratação reduz performance em até 25%.",
@@ -186,8 +186,8 @@ EXERCISE_DATA = [
     "Para ganho muscular (hipertrofia): 4-6 dias/semana de musculação. "
     "Volume: 10-20 séries por grupo muscular/semana. Progressão de carga essencial. "
     "Descanso 60-90s entre séries. Fase excêntrica lenta (3-4s).",
-    "Para melhoria cardiovascular: 150 min/semana de actividade moderada OU "
-    "75 min/semana de actividade vigorosa. Incluir pelo menos 2 sessões de HIIT.",
+    "Para melhoria cardiovascular: 150 min/semana de atividade moderada OU "
+    "75 min/semana de atividade vigorosa. Incluir pelo menos 2 sessões de HIIT.",
 ]
 
 
@@ -218,6 +218,16 @@ def seed_user_preferences(user_id: str, force: bool = False) -> bool:
             pass
 
     logger.info("Seeding default preferences for user: %s", user_id)
+
+    # When force=True, remove existing entries first to avoid stale duplicates
+    if force:
+        try:
+            existing = kb.preferences.get(where={"user_id": user_id})
+            if existing and existing.get("ids"):
+                kb.preferences.delete(ids=existing["ids"])
+                logger.info("Cleared %d existing preferences for user %s", len(existing["ids"]), user_id)
+        except Exception as exc:
+            logger.warning("Could not clear preferences for %s: %s", user_id, exc)
 
     for food in FOOD_LIKES:
         kb.add_preference(user_id, "food_likes", food, {"sentiment": "positive"})

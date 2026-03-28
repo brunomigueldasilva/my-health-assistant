@@ -80,8 +80,8 @@ def get_user_profile(user_id: str | int) -> str:
         f"  • Género: {row['gender'] or '?'}\n"
         f"  • Altura: {row['height_cm'] or '?'} cm\n"
         f"  • Peso: {row['weight_kg'] or '?'} kg\n"
-        f"  • Actividade: {row['activity_level'] or '?'}\n"
-        f"  • Objectivo: {row['goal'] or 'Não definido'}\n\n"
+        f"  • Atividade: {row['activity_level'] or '?'}\n"
+        f"  • Objetivo: {row['goal'] or 'Não definido'}\n\n"
         f"🍽️ Preferências:\n{prefs}"
     )
 
@@ -167,10 +167,10 @@ def update_user_profile(
         label for label, v in [
             ("nome", name), ("idade", age), ("género", gender),
             ("altura", height_cm), ("peso", weight_kg),
-            ("actividade", activity_level), ("objectivo", goal),
+            ("atividade", activity_level), ("objetivo", goal),
         ] if v is not None
     ]
-    return f"✅ Perfil actualizado: {', '.join(updated)}"
+    return f"✅ Perfil atualizado: {', '.join(updated)}"
 
 
 @xai_tool
@@ -223,7 +223,7 @@ def add_health_goal(user_id: str | int, goal: str) -> str:
     )
     conn.commit()
     conn.close()
-    return f"🎯 Objectivo registado: **{goal}**"
+    return f"🎯 Objetivo registado: **{goal}**"
 
 
 @xai_tool
@@ -261,10 +261,105 @@ def get_weight_history(user_id: str | int) -> str:
     return "\n".join(lines)
 
 
+@xai_tool
+def export_user_data(user_id: str | int) -> str:
+    """
+    Export all personal data for a user in a portable format.
+    Implements GDPR Article 20 — Right to Data Portability.
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        JSON string containing all user data (profile, weight history, preferences)
+    """
+    import json
+    user_id = str(user_id)
+    conn = _get_db()
+    profile_row = conn.execute(
+        "SELECT * FROM user_profiles WHERE user_id = ?", (user_id,)
+    ).fetchone()
+    history_rows = conn.execute(
+        "SELECT weight_kg, recorded_at FROM weight_history WHERE user_id = ? ORDER BY recorded_at",
+        (user_id,),
+    ).fetchall()
+    conn.close()
+
+    kb = get_knowledge_base()
+    preferences: dict[str, list[str]] = {}
+    for cat in ("food_likes", "food_dislikes", "allergies", "goals", "restrictions", "health_data"):
+        try:
+            data = kb.preferences.get(
+                where={"$and": [{"user_id": user_id}, {"category": cat}]}
+            )
+            preferences[cat] = data.get("documents", []) if data else []
+        except Exception:
+            preferences[cat] = []
+
+    export = {
+        "export_date": datetime.now().isoformat(),
+        "gdpr_basis": "Art. 20 — Right to Data Portability",
+        "user_id": user_id,
+        "profile": dict(profile_row) if profile_row else {},
+        "weight_history": [
+            {"weight_kg": r["weight_kg"], "recorded_at": r["recorded_at"]}
+            for r in history_rows
+        ],
+        "preferences": preferences,
+    }
+    logger.info("GDPR export requested for user %s", user_id)
+    return json.dumps(export, ensure_ascii=False, indent=2)
+
+
+@xai_tool
+def delete_all_user_data(user_id: str | int) -> str:
+    """
+    Permanently delete all personal data for a user.
+    Implements GDPR Article 17 — Right to Erasure ("Right to be Forgotten").
+
+    Args:
+        user_id: User ID
+
+    Returns:
+        Confirmation of permanent deletion
+    """
+    user_id = str(user_id)
+    conn = _get_db()
+    conn.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM weight_history WHERE user_id = ?", (user_id,))
+    conn.commit()
+    conn.close()
+
+    kb = get_knowledge_base()
+    deleted_prefs = 0
+    for cat in ("food_likes", "food_dislikes", "allergies", "goals", "restrictions", "health_data"):
+        try:
+            data = kb.preferences.get(
+                where={"$and": [{"user_id": user_id}, {"category": cat}]}
+            )
+            if data and data.get("ids"):
+                kb.preferences.delete(ids=data["ids"])
+                deleted_prefs += len(data["ids"])
+        except Exception as exc:
+            logger.warning("Could not delete ChromaDB prefs for %s/%s: %s", user_id, cat, exc)
+
+    logger.info(
+        "GDPR erasure completed for user %s — %d preference entries removed",
+        user_id, deleted_prefs,
+    )
+    return (
+        f"✅ Todos os dados do utilizador {user_id} foram eliminados permanentemente "
+        f"({deleted_prefs} preferências removidas). "
+        "Esta acção é irreversível (RGPD Art. 17)."
+    )
+
+
 PROFILE_TOOLS = [
     get_user_profile,
     update_user_profile,
     add_food_preference,
     add_health_goal,
     get_weight_history,
+    export_user_data,
+    delete_all_user_data,
 ]

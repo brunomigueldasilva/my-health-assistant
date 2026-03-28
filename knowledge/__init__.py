@@ -3,6 +3,7 @@ RAG Knowledge Base — ChromaDB vector store for preferences,
 nutritional information, and exercises.
 """
 
+import hashlib
 import logging
 from typing import Optional
 
@@ -52,7 +53,8 @@ class KnowledgeBase:
         metadata: Optional[dict] = None,
     ) -> str:
         """Adds a preference to the vector store."""
-        doc_id = f"{user_id}_{category}_{hash(text) % 10**8}"
+        text_hash = hashlib.md5(text.encode()).hexdigest()[:8]
+        doc_id = f"{user_id}_{category}_{text_hash}"
         meta = {"user_id": user_id, "category": category}
         if metadata:
             meta.update(metadata)
@@ -86,7 +88,7 @@ class KnowledgeBase:
 
     def add_nutrition_info(self, text: str, metadata: Optional[dict] = None) -> str:
         """Adds nutritional information to the knowledge base."""
-        doc_id = f"nutrition_{hash(text) % 10**8}"
+        doc_id = f"nutrition_{hashlib.md5(text.encode()).hexdigest()[:8]}"
         meta = metadata or {}
         meta["type"] = "nutrition"
 
@@ -111,7 +113,7 @@ class KnowledgeBase:
 
     def add_exercise_info(self, text: str, metadata: Optional[dict] = None) -> str:
         """Adds exercise information to the knowledge base."""
-        doc_id = f"exercise_{hash(text) % 10**8}"
+        doc_id = f"exercise_{hashlib.md5(text.encode()).hexdigest()[:8]}"
         meta = metadata or {}
         meta["type"] = "exercise"
 
@@ -158,7 +160,7 @@ class KnowledgeBase:
             "food_likes": "Alimentos que gosta",
             "food_dislikes": "Alimentos que não gosta",
             "allergies": "Alergias alimentares",
-            "goals": "Objectivos de saúde",
+            "goals": "Objetivos de saúde",
             "health_data": "Dados de saúde",
             "restrictions": "Restrições alimentares",
         }
