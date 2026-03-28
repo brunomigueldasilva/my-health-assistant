@@ -184,7 +184,7 @@ class ExplainabilityTracker:
                 lines.append(f"**Função:** `{tc.name}` &nbsp;·&nbsp; ⏱️ {tc.timestamp}")
                 if args_str:
                     lines.append(f"**Argumentos:** {args_str}")
-                lines.append(f"**Resultado:**")
+                lines.append("**Resultado:**")
                 lines.append(f"> {tc.result_summary.replace(chr(10), '  ')}")
                 if tc.formula_note:
                     lines.append("")

@@ -269,6 +269,40 @@ health-assistant/
 
 ---
 
+## 🗄️ Data Storage
+
+The project uses **three persistent stores**, each with a distinct role:
+
+### SQLite — `data/user_profiles.db`
+
+Relational store for structured personal data.
+
+| Table | Fields |
+|-------|--------|
+| `user_profiles` | `user_id`, `name`, `age`, `gender`, `height_cm`, `weight_kg`, `activity_level`, `goal`, `created_at`, `updated_at` |
+| `weight_history` | `user_id`, `weight_kg`, `recorded_at` |
+
+### SQLite — `data/sessions.db`
+
+Managed automatically by Agno. Stores the full conversation history (messages, tool calls, agent responses) per user session. Not accessed directly by the application code.
+
+### ChromaDB — `data/chromadb/` (vector store)
+
+Three collections, all using **cosine similarity** with `all-MiniLM-L6-v2` embeddings (ChromaDB default):
+
+| Collection | What is stored | How it is used |
+|------------|---------------|----------------|
+| `preferences` | Short texts per user: food likes/dislikes, allergies, dietary restrictions, health goals | **Filter by metadata** (`user_id`, `category`) to build profile summaries; **semantic search** when agents query "what can this user not eat?" |
+| `nutrition_knowledge` | Paragraphs of nutritional information (foods, calories, macros) seeded from `knowledge/seed_data.py` | **Semantic RAG** — retrieved by the Nutritionist and Chef agents when answering nutrition questions |
+| `exercise_knowledge` | Paragraphs of exercise descriptions, muscle groups, calories burned | **Semantic RAG** — retrieved by the Personal Trainer agent when building workout plans |
+
+#### When vector search adds value vs. metadata filtering
+
+- **`preferences`** — items like `"frango"` or `"lactose"` are very short; the main retrieval path uses metadata filters (`user_id` + `category`). Vector similarity kicks in when the agent issues a free-text query (e.g. _"foods to avoid"_).
+- **`nutrition_knowledge` / `exercise_knowledge`** — longer paragraphs; semantic search is the primary retrieval mechanism here, matching the intent of the agent's query against the knowledge base.
+
+---
+
 ## 🔧 Design Notes
 
 ### Language

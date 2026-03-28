@@ -230,7 +230,7 @@ def load_weight_chart(user_id: str):
         return None
     import pandas as pd
     df = pd.DataFrame(
-        [(r["recorded_at"][:10], r["weight_kg"]) for r in rows],
+        [(r["recorded_at"][:19].replace("T", " "), r["weight_kg"]) for r in rows],
         columns=["Data", "Peso (kg)"],
     )
     return df
@@ -250,24 +250,34 @@ def gdpr_export_fn(user_id: str):
 
 def gdpr_delete_fn(user_id: str):
     uid = user_id.strip()
+    empty_profile = ("", None, "", None, None, "", "")
     if not uid:
-        return "❌ Introduz um User ID."
+        return ("❌ Introduz um User ID.", *empty_profile, None)
     try:
         from tools.profile_tools import delete_all_user_data
-        return delete_all_user_data(uid)
+        msg = delete_all_user_data(uid)
+        return (msg, *empty_profile, None)
     except Exception as e:
-        return f"❌ Erro: {e}"
+        return (f"❌ Erro: {e}", *empty_profile, None)
 
 
-def add_weight_entry(user_id: str, weight: float):
+def add_weight_entry(user_id: str, weight_str: str):
     uid = user_id.strip()
+    empty_profile = ("", None, "", None, None, "", "")
     if not uid:
-        return "❌ Introduz um User ID.", None
+        return ("❌ Introduz um User ID.", None, weight_str, *empty_profile)
+    try:
+        weight = float(str(weight_str).strip().replace(",", "."))
+        if weight <= 0 or weight > 500:
+            raise ValueError
+    except (ValueError, TypeError, AttributeError):
+        return ("❌ Valor inválido. Exemplo: 74.8 ou 74,8", None, weight_str, *empty_profile)
     try:
         update_user_profile(uid, weight_kg=weight)
-        return f"✅ Peso {weight} kg registado!", load_weight_chart(uid)
+        profile = load_profile(uid)
+        return (f"✅ Peso {weight} kg registado!", load_weight_chart(uid), None, *profile)
     except Exception as e:
-        return f"❌ Erro: {e}", None
+        return (f"❌ Erro: {e}", None, weight_str, *empty_profile)
 
 
 # ═══════════════════════════════════════════════════════
@@ -733,7 +743,7 @@ def get_dashboard_html(user_id: str):
         # Extract meta diária
         match = re.search(r"Meta diária: (\d+) kcal", tdee_text)
         daily_kcal = match.group(1) if match else "—"
-    except:
+    except Exception:
         daily_kcal = "—"
 
     html = f"""
@@ -760,7 +770,8 @@ def get_dashboard_html(user_id: str):
 
 def check_onboarding_needed(user_id: str):
     uid = user_id.strip()
-    if not uid: return gr.update(visible=False)
+    if not uid:
+        return gr.update(visible=False)
     conn = _db_conn(SQLITE_DB)
     row = conn.execute(
         "SELECT age, gender, height_cm, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
@@ -798,6 +809,12 @@ _CSS = """
 .health-card:hover {
     transform: translateY(-2px);
 }
+
+/* Compact weight registration row */
+.weight-row {
+    max-width: 420px !important;
+    align-items: center !important;
+}
 """
 
 with gr.Blocks(title="Health Assistant") as demo:
@@ -818,7 +835,7 @@ with gr.Blocks(title="Health Assistant") as demo:
         )
 
         # Hidden — driven programmatically; used as input across all tabs
-        global_uid = gr.Textbox(value=_initial_uid, visible=False)
+        global_uid = gr.State(value=_initial_uid)
 
         with gr.Accordion("➕ Novo Utilizador", open=False):
             new_user_name = gr.Textbox(label="Nome", placeholder="Ex: Bruno")
@@ -831,68 +848,6 @@ with gr.Blocks(title="Health Assistant") as demo:
         reset_status = gr.Markdown()
 
     with gr.Tabs() as tabs_container:
-
-        # ── TAB: DASHBOARD ───────────────────────────────
-        with gr.Tab("📊 Painel de Controlo"):
-
-            with gr.Group(visible=False) as onboarding_group:
-                gr.Markdown("### 🚀 Vamos configurar o teu perfil!")
-                gr.Markdown("Parece que ainda não completaste os teus dados básicos. Precisamos deles para personalizar a tua experiência.")
-                with gr.Row():
-                    with gr.Column():
-                        ob_gender = gr.Radio(
-                            choices=[("Masculino", "male"), ("Feminino", "female")],
-                            label="Género",
-                        )
-                        ob_age = gr.Number(label="Idade", precision=0)
-                    with gr.Column():
-                        ob_height = gr.Number(label="Altura (cm)", precision=1)
-                        ob_weight = gr.Number(label="Peso (kg)", precision=1)
-                with gr.Row():
-                    ob_activity = gr.Dropdown(
-                        choices=[
-                            ("Sedentário", "sedentary"),
-                            ("Ligeiro (1-2x/semana)", "light"),
-                            ("Moderado (3-5x/semana)", "moderate"),
-                            ("Activo (6-7x/semana)", "active"),
-                            ("Muito Activo (2x/dia)", "very_active"),
-                        ],
-                        label="Nível de Atividade",
-                    )
-                    ob_goal = gr.Dropdown(
-                        choices=[
-                            ("Perder peso", "lose_weight"),
-                            ("Manter peso", "maintain"),
-                            ("Ganhar massa muscular", "gain_muscle"),
-                        ],
-                        label="Objectivo Principal",
-                    )
-                ob_finish_btn = gr.Button("Finalizar Configuração 🏁", variant="primary")
-                ob_status = gr.Markdown()
-
-            dashboard_html = gr.HTML(get_dashboard_html(_initial_uid))
-
-            with gr.Row():
-                with gr.Column(scale=2):
-                    with gr.Group():
-                        gr.Markdown("### 📈 A Minha Evolução")
-                        dash_weight_chart = gr.LinePlot(
-                            x="Data",
-                            y="Peso (kg)",
-                            height=300,
-                            show_label=False,
-                            value=load_weight_chart(_initial_uid)
-                        )
-
-                with gr.Column(scale=1):
-                    with gr.Group():
-                        gr.Markdown("### ⚖️ Registro Rápido")
-                        dash_weight_input = gr.Number(label="Peso (kg)", precision=1)
-                        dash_weight_btn = gr.Button("Gravar Peso", variant="primary")
-                        dash_weight_status = gr.Markdown()
-
-                    gr.Markdown("---")
-                    goto_chat_btn = gr.Button("💬 Ir para a Conversa", variant="secondary")
 
         # ── TAB: CHAT ────────────────────────────────────
         with gr.Tab("💬 Conversa"):
@@ -944,10 +899,10 @@ with gr.Blocks(title="Health Assistant") as demo:
                 pf_goal = gr.Textbox(label="Objetivo principal", lines=2)
 
             with gr.Accordion("📈 Evolução de Peso", open=False):
-                with gr.Row():
-                    new_weight = gr.Number(label="Registar novo peso (kg)", precision=1)
-                    add_weight_btn = gr.Button("Registar", variant="primary")
-                    weight_status = gr.Markdown()
+                with gr.Row(elem_classes="weight-row"):
+                    new_weight = gr.Textbox(show_label=False, placeholder="Novo peso (kg)  ex: 74.8", scale=3, min_width=200)
+                    add_weight_btn = gr.Button("Registar", variant="primary", scale=1, min_width=120)
+                weight_status = gr.Markdown()
                 weight_chart = gr.LinePlot(
                     x="Data",
                     y="Peso (kg)",
@@ -1150,6 +1105,9 @@ with gr.Blocks(title="Health Assistant") as demo:
                     kb_action_status = gr.Markdown()
 
 
+    # Auto-refresh timer (picks up users/data created via Telegram)
+    refresh_timer = gr.Timer(value=30)
+
     # ── EVENT HANDLERS ───────────────────────────────────
 
     def _load_xai():
@@ -1201,13 +1159,13 @@ with gr.Blocks(title="Health Assistant") as demo:
     gdpr_delete_btn.click(
         gdpr_delete_fn,
         inputs=[global_uid],
-        outputs=[gdpr_status],
+        outputs=[gdpr_status, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal, weight_chart],
     )
 
     add_weight_btn.click(
         add_weight_entry,
         inputs=[global_uid, new_weight],
-        outputs=[weight_status, weight_chart],
+        outputs=[weight_status, weight_chart, new_weight, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
     )
 
     # 3. Preferências — load
@@ -1361,12 +1319,6 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         check_user_status, inputs=[global_uid], outputs=[user_status],
     ).then(
-        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
-    ).then(
-        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
-    ).then(
-        load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
-    ).then(
         load_profile,
         inputs=[global_uid],
         outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
@@ -1381,10 +1333,6 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[new_user_name, new_user_id_input],
         outputs=[create_user_status, user_select, global_uid, user_status, new_user_name, new_user_id_input],
     ).then(
-        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
-    ).then(
-        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
-    ).then(
         load_profile,
         inputs=[global_uid],
         outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
@@ -1392,49 +1340,11 @@ with gr.Blocks(title="Health Assistant") as demo:
         load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
     )
 
-    # Dashboard events
-    ob_finish_btn.click(
-        save_profile,
-        inputs=[global_uid, gr.State(None), ob_age, ob_gender, ob_height, ob_weight, ob_activity, ob_goal],
-        outputs=[ob_status],
-    ).then(
-        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
-    ).then(
-        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
-    ).then(
-        load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
-    ).then(
-        load_profile,
-        inputs=[global_uid],
-        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
-    )
-
-    goto_chat_btn.click(
-        fn=lambda: gr.Tabs(selected=1),
-        outputs=[tabs_container]
-    )
-
-    dash_weight_btn.click(
-        add_weight_entry,
-        inputs=[global_uid, dash_weight_input],
-        outputs=[dash_weight_status, dash_weight_chart],
-    ).then(
-        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
-    ).then(
-        load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
-    )
-
     # Auto-load first user on page startup
     if _initial_uid:
         demo.load(
             fn=lambda: _initial_uid,
             outputs=[global_uid],
-        ).then(
-            check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
-        ).then(
-            get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
-        ).then(
-            load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
         ).then(
             load_profile,
             inputs=[global_uid],
@@ -1444,3 +1354,19 @@ with gr.Blocks(title="Health Assistant") as demo:
         ).then(
             load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
         )
+
+    # Periodic refresh — syncs data created externally (e.g. via Telegram)
+    refresh_timer.tick(
+        fn=lambda: gr.update(choices=list_users()),
+        outputs=[user_select],
+    ).then(
+        check_user_status, inputs=[global_uid], outputs=[user_status],
+    ).then(
+        load_profile,
+        inputs=[global_uid],
+        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    ).then(
+        load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
+    ).then(
+        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    )
