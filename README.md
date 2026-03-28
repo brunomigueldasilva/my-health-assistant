@@ -312,3 +312,62 @@ python main.py
 1. Create a file in `agents/` following the existing pattern
 2. Add it as a `member` in `coordinator.py`
 3. Create specific tools in `tools/` if needed
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome! Here's how you can help:
+
+### How to Contribute
+
+1. **Fork the repository**
+2. **Create a feature branch**:
+   ```bash
+   git checkout -b feature/YourFeature
+   ```
+3. **Make your changes**
+4. **Commit your changes**:
+   ```bash
+   git commit -m "Add YourFeature"
+   ```
+5. **Push to the branch**:
+   ```bash
+   git push origin feature/YourFeature
+   ```
+6. **Open a Pull Request**
+
+### Guidelines
+
+- Follow [PEP 8](https://peps.python.org/pep-0008/) style guide for Python code
+- Add docstrings to all new functions
+- Include comments for complex logic
+- Update `README.md` if adding new features
+- Test your changes thoroughly before submitting
+
+---
+
+## 🆘 Support
+
+If you encounter any issues or have questions:
+
+1. **Read the docs** — check this README thoroughly
+2. **Search issues** — look for similar problems in the [issue tracker](https://github.com/brunomigueldasilva/my-health-assistant/issues)
+3. **Ask a question** — open a new issue with the `question` label
+4. **Report a bug** — open an issue with:
+   - Python version
+   - Operating system
+   - Error messages
+   - Steps to reproduce
+
+**Community:**
+- 💬 [GitHub Discussions](https://github.com/brunomigueldasilva/my-health-assistant/discussions)
+- 📧 [bruno_m_c_silva@proton.me](mailto:bruno_m_c_silva@proton.me)
+
+---
+
+## ⭐ Star History
+
+If you find this project useful, please consider giving it a ⭐ on GitHub — it helps others discover it!
+
+[![GitHub stars](https://img.shields.io/github/stars/brunomigueldasilva/my-health-assistant?style=social)](https://github.com/brunomigueldasilva/my-health-assistant/stargazers)
