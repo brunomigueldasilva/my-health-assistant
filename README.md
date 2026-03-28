@@ -195,17 +195,16 @@ all advice. Send any message in natural language to start.
 
 #### Telegram Commands
 
-| Command                   | Description                                      |
-|---------------------------|--------------------------------------------------|
-| `/start`                  | Welcome message — launches onboarding for new users |
-| `/cancel`                 | Cancel onboarding at any step                    |
-| `/perfil`                 | View full profile and preferences                |
-| `/objectivo <text>`       | Set a health goal                                |
-| `/gosto <food>`           | Add a food you like                              |
-| `/nao_gosto <food>`       | Add a food you dislike                           |
-| `/peso <kg>`              | Log current weight                               |
-| `/historico`              | View weight history and trend                    |
-| `/reset`                  | Clear conversation history (new session)         |
+| Command         | Description                                                   |
+|-----------------|---------------------------------------------------------------|
+| `/start`        | Welcome message — launches onboarding for new users           |
+| `/cancel`       | Cancel onboarding at any step                                 |
+| `/perfil`       | View full profile                                             |
+| `/preferencias` | Manage food likes/dislikes, allergies, restrictions and goals |
+| `/peso <kg>`    | Log current weight                                            |
+| `/historico`    | View weight history and trend                                 |
+| `/reset`        | Clear conversation history (new session)                      |
+| `/help`         | Show available commands                                       |
 
 ### Gradio Web UI
 

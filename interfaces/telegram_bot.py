@@ -90,6 +90,14 @@ _PREF_CATEGORIES = [
 ]
 _PREF_LABEL = {k: v for k, v in _PREF_CATEGORIES}
 
+_PREF_EXAMPLES = {
+    "food_likes":   "Ex: salmão, frango, bróculos, azeite…",
+    "food_dislikes": "Ex: beterraba, fígado, coentros…",
+    "allergies":    "Ex: lactose, glúten, amendoim…",
+    "restrictions": "Ex: vegetariano, low-carb, sem açúcar…",
+    "goals":        "Ex: perder 5 kg, correr 5 km, reduzir gordura visceral…",
+}
+
 _PREFS_STATE = "prefs_state"
 _PREFS_ITEMS = "prefs_items"
 _PREFS_SEL   = "prefs_selected"
@@ -253,11 +261,13 @@ def _add_pref_item(uid: str, cat: str, text: str):
         kb.add_preference(uid, cat, text, {"created": datetime.now().isoformat()})
 
 
-def _format_pref_items(items: list, cat_label: str) -> str:
+def _format_pref_items(items: list, cat_label: str, cat: str = "") -> str:
+    example = _PREF_EXAMPLES.get(cat, "")
+    hint = f"_{example}_\n\n" if example else ""
     if not items:
-        return f"*{cat_label}*\n\n_Nenhum item registado._"
+        return f"*{cat_label}*\n\n{hint}_Nenhum item registado._"
     n = len(items)
-    lines = [f"*{cat_label}* ({n} item{'s' if n != 1 else ''})\n"]
+    lines = [f"*{cat_label}* ({n} item{'s' if n != 1 else ''})\n", hint]
     lines += [f"• {item['text']}" for item in items]
     return "\n".join(lines)
 
@@ -316,7 +326,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A tua equipa de saúde está pronta:\n"
             f"🥗 *Nutricionista* · 🏋️ *Trainer* · 👨‍🍳 *Chef*\n\n"
             f"Basta enviares uma mensagem ou usar:\n"
-            f"/help · /menu · /perfil · /peso · /objectivo · /preferencias · /reset",
+            f"/help · /perfil · /peso · /preferencias · /reset",
             parse_mode="Markdown",
         )
         return
@@ -341,19 +351,14 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "*Comandos disponíveis:*\n\n"
+        "Comandos disponíveis:\n\n"
         "/start - Iniciar o bot e configurar perfil\n"
         "/perfil - Ver o teu perfil\n"
         "/preferencias - Gerir preferências (gostos, alergias, etc.)\n"
-        "/objectivo - Definir ou ver objetivos de saúde\n"
-        "/gosto - Adicionar gostos alimentares\n"
-        "/nao_gosto - Adicionar não-gostos\n"
-        "/peso - Registrar peso atual\n"
+        "/peso - Registar peso actual\n"
         "/historico - Ver histórico de pesos\n"
-        "/reset - Resetar sessão\n"
-        "/help - Mostrar esta ajuda\n"
-        "/menu - Mostrar menu de comandos",
-        parse_mode="Markdown"
+        "/reset - Reiniciar sessão\n"
+        "/help - Mostrar esta ajuda",
     )
 
 
@@ -709,7 +714,7 @@ async def handle_prefs_callback(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data[_PREFS_SEL]   = set()
         cat_label = _PREF_LABEL.get(cat, cat)
         await query.edit_message_text(
-            _format_pref_items(items, cat_label),
+            _format_pref_items(items, cat_label, cat),
             reply_markup=_prefs_view_keyboard(cat, bool(items)),
             parse_mode="Markdown",
         )
@@ -720,8 +725,10 @@ async def handle_prefs_callback(update: Update, context: ContextTypes.DEFAULT_TY
         cat       = data.split(":", 1)[1]
         cat_label = _PREF_LABEL.get(cat, cat)
         context.user_data[_PREFS_STATE] = f"adding:{cat}"
+        example = _PREF_EXAMPLES.get(cat, "")
+        hint = f"\n_{example}_" if example else ""
         await query.edit_message_text(
-            f"*{cat_label}* — Adicionar\n\nEscreve o item a adicionar:",
+            f"*{cat_label}* — Adicionar\n\nEscreve o item a adicionar:{hint}",
             reply_markup=InlineKeyboardMarkup([[
                 InlineKeyboardButton("❌ Cancelar", callback_data=f"prefs_cat:{cat}"),
             ]]),
@@ -776,7 +783,7 @@ async def handle_prefs_callback(update: Update, context: ContextTypes.DEFAULT_TY
         cat_label = _PREF_LABEL.get(cat, cat)
         await query.edit_message_text(
             f"✅ {n_deleted} item(s) removido(s).\n\n"
-            + _format_pref_items(updated, cat_label),
+            + _format_pref_items(updated, cat_label, cat),
             reply_markup=_prefs_view_keyboard(cat, bool(updated)),
             parse_mode="Markdown",
         )
@@ -811,7 +818,7 @@ async def _handle_prefs_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
     await update.message.reply_text(
         f"✅ _{text}_ adicionado a *{cat_label}*.\n\n"
-        + _format_pref_items(items, cat_label),
+        + _format_pref_items(items, cat_label, cat),
         reply_markup=_prefs_view_keyboard(cat, bool(items)),
         parse_mode="Markdown",
     )
@@ -825,35 +832,6 @@ async def _handle_prefs_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def cmd_perfil(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_user_profile(_uid(update)))
 
-
-async def cmd_objectivo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = " ".join(context.args) if context.args else ""
-    if not text:
-        await update.message.reply_text(
-            "❓ Exemplo: `/objectivo Perder 5kg em 3 meses`",
-            parse_mode="Markdown",
-        )
-        return
-    result = add_health_goal(_uid(update), text)
-    await update.message.reply_text(result, parse_mode="Markdown")
-
-
-async def cmd_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    food = " ".join(context.args) if context.args else ""
-    if not food:
-        await update.message.reply_text("❓ Exemplo: `/gosto salmão`", parse_mode="Markdown")
-        return
-    result = add_food_preference(_uid(update), food, likes=True)
-    await update.message.reply_text(result, parse_mode="Markdown")
-
-
-async def cmd_nao_gosto(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    food = " ".join(context.args) if context.args else ""
-    if not food:
-        await update.message.reply_text("❓ Exemplo: `/nao_gosto beterraba`", parse_mode="Markdown")
-        return
-    result = add_food_preference(_uid(update), food, likes=False)
-    await update.message.reply_text(result, parse_mode="Markdown")
 
 
 async def cmd_peso(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1058,12 +1036,8 @@ def create_telegram_app() -> Application:
     # Commands
     app.add_handler(CommandHandler("start",         cmd_start))
     app.add_handler(CommandHandler("help",          cmd_help))
-    app.add_handler(CommandHandler("menu",          cmd_help))
     app.add_handler(CommandHandler("perfil",        cmd_perfil))
     app.add_handler(CommandHandler("preferencias",  cmd_preferencias))
-    app.add_handler(CommandHandler("objectivo",     cmd_objectivo))
-    app.add_handler(CommandHandler("gosto",         cmd_gosto))
-    app.add_handler(CommandHandler("nao_gosto",     cmd_nao_gosto))
     app.add_handler(CommandHandler("peso",          cmd_peso))
     app.add_handler(CommandHandler("historico",     cmd_historico))
     app.add_handler(CommandHandler("reset",         cmd_reset))
