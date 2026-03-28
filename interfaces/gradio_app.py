@@ -10,6 +10,7 @@ Run from the project root:
 """
 
 import json
+import re
 import sqlite3
 import sys
 import uuid
@@ -27,6 +28,7 @@ from tools.profile_tools import (
     add_health_goal,
     update_user_profile,
 )
+from tools.nutrition_tools import calculate_daily_calories
 
 # ── Agent team (lazy init) ───────────────────────────────
 _team = None
@@ -666,7 +668,7 @@ def create_user_fn(name: str, uid: str):
     uid = uid.strip()
     name = name.strip()
     if not uid:
-        return "❌ O User ID é obrigatório.", gr.update(), gr.update(), gr.update(), "", ""
+        return "❌ O ID da Conta é obrigatório.", gr.update(), gr.update(), gr.update(), "", ""
     try:
         update_user_profile(uid, name=name or None)
         users = list_users()
@@ -680,6 +682,92 @@ def create_user_fn(name: str, uid: str):
         )
     except Exception as e:
         return f"❌ Erro: {e}", gr.update(), gr.update(), gr.update(), "", ""
+
+
+# ═══════════════════════════════════════════════════════
+# DASHBOARD METRICS
+# ═══════════════════════════════════════════════════════
+
+def get_dashboard_html(user_id: str):
+    uid = user_id.strip()
+    if not uid:
+        return "<div style='text-align:center; padding:20px;'>Introduce um ID de Conta para ver o teu painel.</div>"
+
+    conn = _db_conn(SQLITE_DB)
+    row = conn.execute(
+        "SELECT * FROM user_profiles WHERE user_id = ?", (uid,)
+    ).fetchone()
+    conn.close()
+
+    if not row or not row["weight_kg"] or not row["height_cm"]:
+        return """
+        <div style='background: rgba(16, 185, 129, 0.1); border: 1px dashed #10b981; border-radius: 12px; padding: 30px; text-align: center;'>
+            <h3 style='margin-top:0; color: #059669;'>Bem-vindo ao teu Painel! 👋</h3>
+            <p>Ainda não temos dados suficientes para calcular as tuas métricas de saúde.</p>
+            <p style='font-size: 0.9em; color: #666;'>Preenche o teu perfil ou usa o formulário abaixo para começar.</p>
+        </div>
+        """
+
+    # Calculate BMI
+    weight, height = row["weight_kg"], row["height_cm"] / 100
+    bmi = weight / (height * height)
+    bmi_category = "Peso Normal"
+    bmi_color = "#10b981"
+    if bmi < 18.5:
+        bmi_category = "Abaixo do peso"
+        bmi_color = "#3b82f6"
+    elif 25 <= bmi < 30:
+        bmi_category = "Sobrepeso"
+        bmi_color = "#f59e0b"
+    elif bmi >= 30:
+        bmi_category = "Obesidade"
+        bmi_color = "#ef4444"
+
+    # Get TDEE from nutrition tools logic
+    try:
+        tdee_text = calculate_daily_calories(
+            row["weight_kg"], row["height_cm"], row["age"] or 30,
+            row["gender"] or "male", row["activity_level"] or "moderate",
+            row["goal"] or "maintain"
+        )
+        # Extract meta diária
+        match = re.search(r"Meta diária: (\d+) kcal", tdee_text)
+        daily_kcal = match.group(1) if match else "—"
+    except:
+        daily_kcal = "—"
+
+    html = f"""
+    <div style='display: flex; gap: 15px; flex-wrap: wrap; justify-content: space-between;'>
+        <div style='flex: 1; min-width: 200px; background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
+            <div style='color: #6b7280; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;'>Peso Actual</div>
+            <div style='font-size: 2rem; font-weight: 700; color: #111827; margin: 10px 0;'>{row['weight_kg']} <span style='font-size: 1rem; font-weight: 400; color: #6b7280;'>kg</span></div>
+            <div style='font-size: 0.85rem; color: #059669; font-weight: 500;'>Altura: {row['height_cm']} cm</div>
+        </div>
+        <div style='flex: 1; min-width: 200px; background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
+            <div style='color: #6b7280; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;'>IMC (BMI)</div>
+            <div style='font-size: 2rem; font-weight: 700; color: #111827; margin: 10px 0;'>{bmi:.1f}</div>
+            <div style='font-size: 0.85rem; color: {bmi_color}; font-weight: 600;'>{bmi_category}</div>
+        </div>
+        <div style='flex: 1; min-width: 200px; background: white; border: 1px solid #e5e7eb; border-radius: 12px; padding: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1);'>
+            <div style='color: #6b7280; font-size: 0.85rem; font-weight: 600; text-transform: uppercase;'>Meta Calórica</div>
+            <div style='font-size: 2rem; font-weight: 700; color: #111827; margin: 10px 0;'>{daily_kcal} <span style='font-size: 1rem; font-weight: 400; color: #6b7280;'>kcal</span></div>
+            <div style='font-size: 0.85rem; color: #6b7280;'>Baseado no teu objectivo</div>
+        </div>
+    </div>
+    """
+    return html
+
+
+def check_onboarding_needed(user_id: str):
+    uid = user_id.strip()
+    if not uid: return gr.update(visible=False)
+    conn = _db_conn(SQLITE_DB)
+    row = conn.execute(
+        "SELECT age, gender, height_cm, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
+    ).fetchone()
+    conn.close()
+    is_complete = bool(row and row["age"] and row["gender"] and row["height_cm"] and row["weight_kg"])
+    return gr.update(visible=not is_complete)
 
 
 # ═══════════════════════════════════════════════════════
@@ -701,6 +789,14 @@ _CSS = """
 }
 .vertical-list .wrap label:hover {
     background: rgba(255,255,255,0.06) !important;
+}
+
+/* Dashboard Cards */
+.health-card {
+    transition: transform 0.2s;
+}
+.health-card:hover {
+    transform: translateY(-2px);
 }
 """
 
@@ -726,15 +822,77 @@ with gr.Blocks(title="Health Assistant") as demo:
 
         with gr.Accordion("➕ Novo Utilizador", open=False):
             new_user_name = gr.Textbox(label="Nome", placeholder="Ex: Bruno")
-            new_user_id_input = gr.Textbox(label="User ID", placeholder="Ex: 29255997")
-            create_user_btn = gr.Button("Criar", variant="primary")
+            new_user_id_input = gr.Textbox(label="ID da Conta", placeholder="Ex: 29255997")
+            create_user_btn = gr.Button("Criar Conta", variant="primary")
             create_user_status = gr.Markdown()
 
         gr.Markdown("---")
         reset_btn = gr.Button("🗑️ Limpar Conversa", variant="secondary", size="sm")
         reset_status = gr.Markdown()
 
-    with gr.Tabs():
+    with gr.Tabs() as tabs_container:
+
+        # ── TAB: DASHBOARD ───────────────────────────────
+        with gr.Tab("📊 Painel de Controlo"):
+
+            with gr.Group(visible=False) as onboarding_group:
+                gr.Markdown("### 🚀 Vamos configurar o teu perfil!")
+                gr.Markdown("Parece que ainda não completaste os teus dados básicos. Precisamos deles para personalizar a tua experiência.")
+                with gr.Row():
+                    with gr.Column():
+                        ob_gender = gr.Radio(
+                            choices=[("Masculino", "male"), ("Feminino", "female")],
+                            label="Género",
+                        )
+                        ob_age = gr.Number(label="Idade", precision=0)
+                    with gr.Column():
+                        ob_height = gr.Number(label="Altura (cm)", precision=1)
+                        ob_weight = gr.Number(label="Peso (kg)", precision=1)
+                with gr.Row():
+                    ob_activity = gr.Dropdown(
+                        choices=[
+                            ("Sedentário", "sedentary"),
+                            ("Ligeiro (1-2x/semana)", "light"),
+                            ("Moderado (3-5x/semana)", "moderate"),
+                            ("Activo (6-7x/semana)", "active"),
+                            ("Muito Activo (2x/dia)", "very_active"),
+                        ],
+                        label="Nível de Atividade",
+                    )
+                    ob_goal = gr.Dropdown(
+                        choices=[
+                            ("Perder peso", "lose_weight"),
+                            ("Manter peso", "maintain"),
+                            ("Ganhar massa muscular", "gain_muscle"),
+                        ],
+                        label="Objectivo Principal",
+                    )
+                ob_finish_btn = gr.Button("Finalizar Configuração 🏁", variant="primary")
+                ob_status = gr.Markdown()
+
+            dashboard_html = gr.HTML(get_dashboard_html(_initial_uid))
+
+            with gr.Row():
+                with gr.Column(scale=2):
+                    with gr.Group():
+                        gr.Markdown("### 📈 A Minha Evolução")
+                        dash_weight_chart = gr.LinePlot(
+                            x="Data",
+                            y="Peso (kg)",
+                            height=300,
+                            show_label=False,
+                            value=load_weight_chart(_initial_uid)
+                        )
+
+                with gr.Column(scale=1):
+                    with gr.Group():
+                        gr.Markdown("### ⚖️ Registro Rápido")
+                        dash_weight_input = gr.Number(label="Peso (kg)", precision=1)
+                        dash_weight_btn = gr.Button("Gravar Peso", variant="primary")
+                        dash_weight_status = gr.Markdown()
+
+                    gr.Markdown("---")
+                    goto_chat_btn = gr.Button("💬 Ir para a Conversa", variant="secondary")
 
         # ── TAB: CHAT ────────────────────────────────────
         with gr.Tab("💬 Conversa"):
@@ -755,7 +913,7 @@ with gr.Blocks(title="Health Assistant") as demo:
                     send_btn = gr.Button("Enviar ↩", variant="primary", scale=1, interactive=False)
 
         # ── TAB: PERFIL ──────────────────────────────────
-        with gr.Tab("👤 O Meu Perfil"):
+        with gr.Tab("👤 Perfil"):
             with gr.Row():
                 load_profile_btn = gr.Button("📥 Carregar Perfil", variant="primary")
                 save_profile_btn = gr.Button("💾 Guardar Alterações", variant="secondary")
@@ -811,7 +969,7 @@ with gr.Blocks(title="Health Assistant") as demo:
                 gdpr_export_out = gr.Code(label="Dados exportados (JSON)", language="json", visible=False)
 
         # ── TAB: PREFERÊNCIAS ────────────────────────────
-        with gr.Tab("🥗 Preferências"):
+        with gr.Tab("🥗 Nutrição e Gostos"):
             with gr.Row():
                 load_prefs_btn = gr.Button("🔄 Carregar Preferências", variant="primary")
                 apply_seed_btn = gr.Button("🌱 Aplicar Padrão", variant="secondary")
@@ -1203,6 +1361,12 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         check_user_status, inputs=[global_uid], outputs=[user_status],
     ).then(
+        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
+    ).then(
+        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
+    ).then(
+        load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
+    ).then(
         load_profile,
         inputs=[global_uid],
         outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
@@ -1217,6 +1381,10 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[new_user_name, new_user_id_input],
         outputs=[create_user_status, user_select, global_uid, user_status, new_user_name, new_user_id_input],
     ).then(
+        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
+    ).then(
+        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
+    ).then(
         load_profile,
         inputs=[global_uid],
         outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
@@ -1224,11 +1392,49 @@ with gr.Blocks(title="Health Assistant") as demo:
         load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
     )
 
+    # Dashboard events
+    ob_finish_btn.click(
+        save_profile,
+        inputs=[global_uid, gr.State(None), ob_age, ob_gender, ob_height, ob_weight, ob_activity, ob_goal],
+        outputs=[ob_status],
+    ).then(
+        check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
+    ).then(
+        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
+    ).then(
+        load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
+    ).then(
+        load_profile,
+        inputs=[global_uid],
+        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    )
+
+    goto_chat_btn.click(
+        fn=lambda: gr.Tabs(selected=1),
+        outputs=[tabs_container]
+    )
+
+    dash_weight_btn.click(
+        add_weight_entry,
+        inputs=[global_uid, dash_weight_input],
+        outputs=[dash_weight_status, dash_weight_chart],
+    ).then(
+        get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
+    ).then(
+        load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
+    )
+
     # Auto-load first user on page startup
     if _initial_uid:
         demo.load(
             fn=lambda: _initial_uid,
             outputs=[global_uid],
+        ).then(
+            check_onboarding_needed, inputs=[global_uid], outputs=[onboarding_group],
+        ).then(
+            get_dashboard_html, inputs=[global_uid], outputs=[dashboard_html],
+        ).then(
+            load_weight_chart, inputs=[global_uid], outputs=[dash_weight_chart],
         ).then(
             load_profile,
             inputs=[global_uid],
