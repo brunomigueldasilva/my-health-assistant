@@ -121,7 +121,7 @@ def check_user_status(uid: str) -> str:
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 1 — CHAT
+# TAB 1 — CONVERSA
 # ═══════════════════════════════════════════════════════
 
 async def chat_fn(message: str, history: list, user_id: str):
@@ -168,7 +168,7 @@ def reset_chat(user_id: str):
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 2 — PROFILE
+# TAB 2 — PERFIL
 # ═══════════════════════════════════════════════════════
 
 def load_profile(user_id: str):
@@ -269,7 +269,7 @@ def add_weight_entry(user_id: str, weight: float):
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 3 — PREFERÊNCIAS (helpers)
+# TAB 3 — PREFERÊNCIAS
 # ═══════════════════════════════════════════════════════
 
 _PREF_CATS = ["food_likes", "food_dislikes", "allergies", "goals", "restrictions", "health_data"]
@@ -450,7 +450,7 @@ def apply_seed_fn(user_id: str):
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 4 — SESSIONS
+# TAB 4 — ADMINISTRAÇÃO (sub-tab: Sessões)
 # ═══════════════════════════════════════════════════════
 
 def load_sessions(user_id_filter: str = ""):
@@ -557,7 +557,7 @@ def delete_session_fn(session_id_partial: str):
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 5 — LOGS
+# TAB 4 — ADMINISTRAÇÃO (sub-tab: Logs)
 # ═══════════════════════════════════════════════════════
 
 LOG_FILE = BASE_DIR / "logs" / "health-assistant.log"
@@ -598,7 +598,7 @@ def log_stats_fn():
 
 
 # ═══════════════════════════════════════════════════════
-# TAB 6 — KNOWLEDGE BASE
+# TAB 4 — ADMINISTRAÇÃO (sub-tab: Base de Conhecimento)
 # ═══════════════════════════════════════════════════════
 
 def load_knowledge(collection: str, search: str):

@@ -13,6 +13,7 @@ with two interfaces: Telegram Bot and Gradio Web UI.
 - **RAG Knowledge Base** — ChromaDB with preferences, goals, and history
 - **User Profile** — SQLite with personal data and weight history
 - **Session Storage** — SQLite with per-user conversation history
+- **Explainability (XAI)** — Transparent tracking of tool calls and RAG queries per message
 
 ## Prerequisites
 
@@ -163,39 +164,59 @@ nutritional and exercise data.
 
 ### Telegram
 
-Send messages to the bot in any natural language:
+#### Onboarding
 
-- **Nutrition**: "I want a meal plan to lose visceral fat"
-- **Workout**: "Suggest a 30-minute HIIT session"
-- **Recipes**: "Give me a healthy recipe with chicken and broccoli"
-- **Goals**: "I want to reach 75 kg in 3 months"
-- **Preferences**: "I don't like beetroot or liver"
+When a new user sends `/start`, a guided onboarding flow is launched using
+Telegram inline keyboards — no manual typing required for profile setup:
+
+```
+/start
+ ├─ New user → interactive onboarding (4 steps, ~1 minute)
+ │    ├─ Step 1 — Personal data: gender (buttons), age range (buttons),
+ │    │           height and weight (text input with skip option)
+ │    ├─ Step 2 — Activity level (5 buttons)
+ │    ├─ Step 3 — Health goal (4 buttons)
+ │    └─ Step 4 — Allergies (multi-select toggle buttons)
+ │         → Profile summary shown on completion
+ │
+ └─ Returning user → welcome-back message (onboarding skipped)
+```
+
+After onboarding the assistant immediately uses the profile to personalise
+all advice. Send any message in natural language to start.
+
+#### Conversational examples
+
+- **Nutrition**: "Quero um plano alimentar para perder gordura visceral"
+- **Workout**: "Sugere um treino HIIT de 30 minutos"
+- **Recipes**: "Dá-me uma receita saudável com frango e brócolos"
+- **Goals**: "Quero chegar aos 75 kg em 3 meses"
+- **Preferences**: "Não gosto de beterraba nem fígado"
 
 #### Telegram Commands
 
-| Command                   | Description                        |
-|---------------------------|------------------------------------|
-| `/start`                  | Welcome message and initial setup  |
-| `/perfil`                 | View profile and preferences       |
-| `/objectivo <text>`       | Set a health goal                  |
-| `/gosto <food>`           | Add a food you like                |
-| `/nao_gosto <food>`       | Add a food you dislike             |
-| `/peso <kg>`              | Log current weight                 |
-| `/historico`              | View weight history                |
-| `/reset`                  | Clear conversation history         |
+| Command                   | Description                                      |
+|---------------------------|--------------------------------------------------|
+| `/start`                  | Welcome message — launches onboarding for new users |
+| `/cancel`                 | Cancel onboarding at any step                    |
+| `/perfil`                 | View full profile and preferences                |
+| `/objectivo <text>`       | Set a health goal                                |
+| `/gosto <food>`           | Add a food you like                              |
+| `/nao_gosto <food>`       | Add a food you dislike                           |
+| `/peso <kg>`              | Log current weight                               |
+| `/historico`              | View weight history and trend                    |
+| `/reset`                  | Clear conversation history (new session)         |
 
 ### Gradio Web UI
 
-A full web interface with 6 tabs:
+A full web interface with **4 tabs** (the last tab groups admin tools into sub-tabs):
 
-| Tab                       | Description                                             |
-|---------------------------|---------------------------------------------------------|
-| 💬 Chat                   | Chat with the agents in real time                       |
-| 👤 Profile                | Edit personal data and log weight (chart included)      |
-| 🍽️ Preferences            | Manage likes, dislikes, allergies, restrictions, goals  |
-| 📋 Sessions               | Browse and delete conversation sessions                 |
-| 📄 Logs                   | View and filter application logs                        |
-| 🧠 Knowledge Base         | Search, add, and remove RAG documents                   |
+| Tab                        | Description                                             |
+|----------------------------|---------------------------------------------------------|
+| 💬 Conversa                | Chat with the agents in real time + XAI panel           |
+| 👤 O Meu Perfil            | Edit personal data and log weight (chart included)      |
+| 🥗 Preferências            | Manage likes, dislikes, allergies, restrictions, goals  |
+| ⚙️ Administração           | Sub-tabs: Explicabilidade · Sessões · Logs · Base de Conhecimento |
 
 The **User ID** is shared across all tabs. Use your Telegram user ID to access
 existing profile data from the bot in the web UI.
@@ -204,7 +225,7 @@ existing profile data from the bot in the web UI.
 
 ```
 health-assistant/
-├── main.py                       # Entry point (Telegram bot)
+├── main.py                       # Entry point (Telegram bot + Gradio UI)
 ├── requirements.txt
 ├── .env
 ├── config/
@@ -215,15 +236,17 @@ health-assistant/
 │   ├── trainer.py                # Personal trainer agent
 │   └── chef.py                   # Chef agent
 ├── interfaces/
-│   ├── telegram_bot.py           # Telegram interface
-│   └── gradio_app.py             # Gradio Web UI
+│   ├── telegram_bot.py           # Telegram interface + onboarding ConversationHandler
+│   └── gradio_app.py             # Gradio Web UI (4 tabs)
 ├── knowledge/
 │   ├── __init__.py               # RAG with ChromaDB
 │   └── seed_data.py              # Initial seed data (nutrition + exercises)
 ├── tools/
 │   ├── nutrition_tools.py        # Calories, macros, food lookup
 │   ├── exercise_tools.py         # Exercises and workout plans
-│   └── profile_tools.py          # Profile, preferences, weight
+│   └── profile_tools.py          # Profile, preferences, weight, allergies
+├── xai/
+│   └── __init__.py               # Explainability tracker (@xai_tool decorator)
 ├── data/
 │   ├── chromadb/                 # Vector store (preferences, nutrition, exercises)
 │   ├── user_profiles.db          # SQLite — profiles and weight history
@@ -244,6 +267,17 @@ local models. Code documentation follows the same convention for consistency.
 **User-facing responses** and **knowledge base content** are in **Portuguese**
 because they are output — the model receives the instruction
 "ALWAYS respond in European Portuguese" and generates text in the right language.
+
+### Onboarding design
+
+The Telegram onboarding uses a `ConversationHandler` (python-telegram-bot v21) with
+8 states. Each step uses `InlineKeyboardMarkup` for structured choices (gender, age
+range, activity level, goal) and free-text input with a skip button for numeric fields
+(height, weight). Allergies use a toggle-button pattern — buttons update their label
+with ✅ to reflect the current selection without leaving the step.
+
+`/start` detects whether the user already has a complete profile (`age`, `gender`,
+`weight_kg` set) and skips onboarding for returning users.
 
 ### Switching LLM providers
 
@@ -279,7 +313,7 @@ the correct Agno model object for all agents automatically.
 ### Session persistence
 
 Agno automatically persists each session's history in `data/sessions.db`.
-Each user has one active session. `/reset` (Telegram) or "New Session" (Gradio)
+Each user has one active session. `/reset` (Telegram) or "Nova Sessão" (Gradio)
 creates a new session without deleting the previous history.
 
 ### Log persistence

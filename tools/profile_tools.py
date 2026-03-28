@@ -173,6 +173,26 @@ def update_user_profile(
     return f"✅ Perfil atualizado: {', '.join(updated)}"
 
 
+def add_allergy(user_id: str | int, allergy: str) -> str:
+    """
+    Add an allergy or food intolerance for the user.
+
+    Args:
+        user_id: Telegram user ID
+        allergy: Allergy or intolerance name (e.g. "glúten", "lactose")
+
+    Returns:
+        Confirmation message
+    """
+    user_id = str(user_id)
+    kb = get_knowledge_base()
+    kb.add_preference(
+        user_id, "allergies", allergy,
+        {"type": "allergy", "created": datetime.now().isoformat()},
+    )
+    return f"⚠️ Alergia/intolerância registada: **{allergy}**"
+
+
 @xai_tool
 def add_food_preference(user_id: str | int, food: str, likes: bool) -> str:
     """
