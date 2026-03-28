@@ -2,7 +2,9 @@
 Telegram Bot Interface — connects Telegram to the Agno agent team.
 
 Handles commands, messages, and routes everything to the coordinator.
-Includes a guided onboarding ConversationHandler for new users.
+Includes a guided onboarding flow for new users via inline keyboards.
+State is tracked in context.user_data to avoid ConversationHandler
+state-persistence pitfalls.
 """
 
 import asyncio
@@ -15,7 +17,6 @@ from telegram.ext import (
     Application,
     CallbackQueryHandler,
     CommandHandler,
-    ConversationHandler,
     MessageHandler,
     ContextTypes,
     filters,
@@ -38,16 +39,27 @@ logger = logging.getLogger(__name__)
 _team = None
 _user_sessions: dict[str, str] = {}
 
-# ── Onboarding conversation states ────────────────────
-(WELCOME, GENDER, AGE, HEIGHT, WEIGHT, ACTIVITY, GOAL, ALLERGIES) = range(8)
+# ── Onboarding step keys (stored in context.user_data) ─
+_ONB_STEP   = "onb_step"   # current step name
+_ONB_DATA   = "onb_data"   # collected values dict
 
-# ── Onboarding display labels ─────────────────────────
+# Step names
+_STEP_WELCOME  = "welcome"
+_STEP_GENDER   = "gender"
+_STEP_AGE      = "age"
+_STEP_HEIGHT   = "height"
+_STEP_WEIGHT   = "weight"
+_STEP_ACTIVITY = "activity"
+_STEP_GOAL     = "goal"
+_STEP_ALLERGIES = "allergies"
+
+# ── Onboarding option labels ───────────────────────────
 _ACTIVITY_OPTIONS = [
-    ("sedentary",  "🛋️ Sedentário"),
-    ("light",      "🚶 Ligeiro"),
-    ("moderate",   "🏃 Moderado"),
-    ("active",     "💪 Activo"),
-    ("very_active","🔥 Muito Activo"),
+    ("sedentary",   "🛋️ Sedentário"),
+    ("light",       "🚶 Ligeiro"),
+    ("moderate",    "🏃 Moderado"),
+    ("active",      "💪 Activo"),
+    ("very_active", "🔥 Muito Activo"),
 ]
 _ACTIVITY_LABEL = {k: v for k, v in _ACTIVITY_OPTIONS}
 
@@ -61,15 +73,14 @@ _GOAL_LABEL = {k: v for k, v in _GOAL_OPTIONS}
 
 _ALLERGY_OPTIONS = ["Glúten", "Lactose", "Frutos secos", "Marisco", "Ovos", "Amendoins"]
 
-_AGE_OPTIONS = ["18-25", "26-35", "36-45", "46-55", "56+"]
+_AGE_MIDPOINTS = {"18-25": 22, "26-35": 30, "36-45": 40, "46-55": 50, "56+": 60}
 
 
 # ══════════════════════════════════════════════════════
-# HELPERS
+# CORE HELPERS
 # ══════════════════════════════════════════════════════
 
 def get_team():
-    """Lazy init of the agent team."""
     global _team
     if _team is None:
         logger.info("Creating agent team...")
@@ -99,17 +110,79 @@ def _uname(update: Update) -> str:
 
 
 def _is_profile_complete(uid: str) -> bool:
-    """Returns True if the user has filled in the core profile fields."""
-    conn = sqlite3.connect(str(SQLITE_DB))
-    row = conn.execute(
-        "SELECT age, gender, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
-    ).fetchone()
-    conn.close()
-    return bool(row and row[0] and row[1] and row[2])
+    """True if core profile fields (age, gender, weight) are filled."""
+    try:
+        conn = sqlite3.connect(str(SQLITE_DB))
+        row = conn.execute(
+            "SELECT age, gender, weight_kg FROM user_profiles WHERE user_id = ?",
+            (uid,),
+        ).fetchone()
+        conn.close()
+        return bool(row and row[0] and row[1] and row[2])
+    except Exception:
+        return False
+
+
+def _onb_step(context: ContextTypes.DEFAULT_TYPE) -> str | None:
+    return context.user_data.get(_ONB_STEP)
+
+
+def _onb_data(context: ContextTypes.DEFAULT_TYPE) -> dict:
+    if _ONB_DATA not in context.user_data:
+        context.user_data[_ONB_DATA] = {}
+    return context.user_data[_ONB_DATA]
+
+
+def _onb_clear(context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop(_ONB_STEP, None)
+    context.user_data.pop(_ONB_DATA, None)
+
+
+# ══════════════════════════════════════════════════════
+# ONBOARDING — KEYBOARD BUILDERS
+# ══════════════════════════════════════════════════════
+
+def _gender_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("👨 Masculino", callback_data="ob_gender:M"),
+        InlineKeyboardButton("👩 Feminino",  callback_data="ob_gender:F"),
+    ]])
+
+
+def _age_keyboard() -> InlineKeyboardMarkup:
+    ages = list(_AGE_MIDPOINTS.keys())
+    rows = [
+        [InlineKeyboardButton(a, callback_data=f"ob_age:{a}") for a in ages[:3]],
+        [InlineKeyboardButton(a, callback_data=f"ob_age:{a}") for a in ages[3:]],
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def _skip_keyboard(cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[
+        InlineKeyboardButton("⏭️ Saltar", callback_data=cb),
+    ]])
+
+
+def _activity_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"ob_activity:{key}")]
+        for key, label in _ACTIVITY_OPTIONS
+    ]
+    return InlineKeyboardMarkup(rows)
+
+
+def _goal_keyboard() -> InlineKeyboardMarkup:
+    rows = []
+    for i in range(0, len(_GOAL_OPTIONS), 2):
+        rows.append([
+            InlineKeyboardButton(label, callback_data=f"ob_goal:{key}")
+            for key, label in _GOAL_OPTIONS[i:i + 2]
+        ])
+    return InlineKeyboardMarkup(rows)
 
 
 def _allergy_keyboard(selected: set) -> InlineKeyboardMarkup:
-    """Build the toggle-style allergy selection keyboard."""
     rows = []
     for i in range(0, len(_ALLERGY_OPTIONS), 2):
         row = []
@@ -128,16 +201,19 @@ def _allergy_keyboard(selected: set) -> InlineKeyboardMarkup:
 
 
 # ══════════════════════════════════════════════════════
-# ONBOARDING — STEP HANDLERS
+# ONBOARDING — ENTRY POINT  (/start)
 # ══════════════════════════════════════════════════════
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Entry point: show welcome for existing users, start onboarding for new ones."""
     uid, name = _uid(update), _uname(update)
-    update_user_profile(uid, name=name)
+
+    try:
+        update_user_profile(uid, name=name)
+    except Exception as exc:
+        logger.warning("cmd_start: could not upsert profile for %s: %s", uid, exc)
 
     if _is_profile_complete(uid):
-        # Returning user — skip onboarding
+        _onb_clear(context)
         await update.message.reply_text(
             f"Bem-vindo de volta, *{name}*! 👋\n\n"
             f"A tua equipa de saúde está pronta:\n"
@@ -147,315 +223,280 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"/objectivo — Definir objetivo · /reset — Nova conversa",
             parse_mode="Markdown",
         )
-        return ConversationHandler.END
+        return
 
-    keyboard = [
+    # New / incomplete profile → start onboarding
+    context.user_data[_ONB_STEP] = _STEP_WELCOME
+    context.user_data[_ONB_DATA] = {}
+
+    keyboard = InlineKeyboardMarkup([
         [InlineKeyboardButton("🚀 Criar o meu perfil", callback_data="ob_start")],
-        [InlineKeyboardButton("⏭️ Saltar por agora", callback_data="ob_skip")],
-    ]
+        [InlineKeyboardButton("⏭️ Saltar por agora",   callback_data="ob_skip")],
+    ])
     await update.message.reply_text(
         f"Olá *{name}*! 👋\n\n"
         f"Sou o teu assistente pessoal de saúde, com uma equipa de especialistas:\n"
         f"🥗 *Nutricionista* · 🏋️ *Personal Trainer* · 👨‍🍳 *Chef*\n\n"
         f"Para receber conselhos personalizados, preciso de conhecer-te melhor.\n"
         f"São apenas *4 passos rápidos* — menos de 1 minuto! ⚡",
-        reply_markup=InlineKeyboardMarkup(keyboard),
+        reply_markup=keyboard,
         parse_mode="Markdown",
     )
-    return WELCOME
 
 
-async def onb_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle 'Criar perfil' or 'Saltar' from welcome screen."""
+# ══════════════════════════════════════════════════════
+# ONBOARDING — CALLBACK DISPATCHER
+# ══════════════════════════════════════════════════════
+
+async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Single handler for all ob_* callback queries — dispatches by step + data."""
     query = update.callback_query
     await query.answer()
 
-    if query.data == "ob_skip":
+    data = query.data
+    step = _onb_step(context)
+
+    logger.debug("onboarding callback: step=%s data=%s", step, data)
+
+    # ── ob_skip: abandon onboarding at any point ──────
+    if data == "ob_skip":
+        _onb_clear(context)
         await query.edit_message_text(
-            "Tudo bem! Podes começar a conversar quando quiseres. 💬\n\n"
+            "Tudo bem! Podes começar a conversar quando quiseres. 💬\n"
             "Usa /start a qualquer altura para configurar o teu perfil.",
         )
-        return ConversationHandler.END
+        return
 
-    # ob_start → ask gender
-    context.user_data["onb"] = {}
-    keyboard = [[
-        InlineKeyboardButton("👨 Masculino", callback_data="ob_gender:M"),
-        InlineKeyboardButton("👩 Feminino",  callback_data="ob_gender:F"),
-    ]]
-    await query.edit_message_text(
-        "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-        "Qual é o teu género?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-    )
-    return GENDER
-
-
-async def onb_gender(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    gender = query.data.split(":")[1]  # M or F
-    context.user_data["onb"]["gender"] = "male" if gender == "M" else "female"
-
-    # Build age range buttons (2 per row)
-    age_buttons = [
-        InlineKeyboardButton(age, callback_data=f"ob_age:{age}")
-        for age in _AGE_OPTIONS
-    ]
-    rows = [age_buttons[:3], age_buttons[3:]]
-    await query.edit_message_text(
-        "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-        "Qual é a tua faixa etária?",
-        reply_markup=InlineKeyboardMarkup(rows),
-        parse_mode="Markdown",
-    )
-    return AGE
-
-
-async def onb_age(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    age_range = query.data.split(":")[1]
-    # Store midpoint as integer age
-    midpoints = {"18-25": 22, "26-35": 30, "36-45": 40, "46-55": 50, "56+": 60}
-    context.user_data["onb"]["age"] = midpoints.get(age_range, 35)
-    context.user_data["onb"]["age_label"] = age_range
-
-    keyboard = [[InlineKeyboardButton("⏭️ Saltar", callback_data="ob_height_skip")]]
-    await query.edit_message_text(
-        "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-        "Qual é a tua altura? _(em cm, ex: 175)_",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-    )
-    return HEIGHT
-
-
-async def onb_height(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().replace(",", ".")
-    try:
-        height = float(text)
-        if not (100 <= height <= 250):
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Altura inválida. Insere um valor entre 100 e 250 cm (ex: *175*).",
+    # ── ob_start: welcome → gender ────────────────────
+    if data == "ob_start":
+        context.user_data[_ONB_STEP] = _STEP_GENDER
+        await query.edit_message_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\nQual é o teu género?",
+            reply_markup=_gender_keyboard(),
             parse_mode="Markdown",
         )
-        return HEIGHT
+        return
 
-    context.user_data["onb"]["height_cm"] = height
-    await _ask_weight(update.message)
-    return WEIGHT
-
-
-async def onb_height_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    await query.edit_message_text(
-        "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-        "Qual é o teu peso actual? _(em kg, ex: 78.5)_",
-        reply_markup=InlineKeyboardMarkup([[
-            InlineKeyboardButton("⏭️ Saltar", callback_data="ob_weight_skip")
-        ]]),
-        parse_mode="Markdown",
-    )
-    return WEIGHT
-
-
-async def _ask_weight(message):
-    keyboard = [[InlineKeyboardButton("⏭️ Saltar", callback_data="ob_weight_skip")]]
-    await message.reply_text(
-        "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-        "Qual é o teu peso actual? _(em kg, ex: 78.5)_",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-    )
-
-
-async def onb_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip().replace(",", ".")
-    try:
-        weight = float(text)
-        if not (30 <= weight <= 300):
-            raise ValueError
-    except ValueError:
-        await update.message.reply_text(
-            "❌ Peso inválido. Insere um valor entre 30 e 300 kg (ex: *78.5*).",
+    # ── ob_gender:* ───────────────────────────────────
+    if data.startswith("ob_gender:") and step == _STEP_GENDER:
+        gender = "male" if data.endswith(":M") else "female"
+        _onb_data(context)["gender"] = gender
+        context.user_data[_ONB_STEP] = _STEP_AGE
+        await query.edit_message_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\nQual é a tua faixa etária?",
+            reply_markup=_age_keyboard(),
             parse_mode="Markdown",
         )
-        return WEIGHT
+        return
 
-    context.user_data["onb"]["weight_kg"] = weight
-    await _ask_activity(update.message)
-    return ACTIVITY
+    # ── ob_age:* ──────────────────────────────────────
+    if data.startswith("ob_age:") and step == _STEP_AGE:
+        age_range = data.split(":", 1)[1]
+        _onb_data(context)["age"] = _AGE_MIDPOINTS.get(age_range, 35)
+        _onb_data(context)["age_label"] = age_range
+        context.user_data[_ONB_STEP] = _STEP_HEIGHT
+        await query.edit_message_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
+            "Qual é a tua altura? _(em cm, ex: 175)_",
+            reply_markup=_skip_keyboard("ob_height_skip"),
+            parse_mode="Markdown",
+        )
+        return
 
+    # ── ob_height_skip ────────────────────────────────
+    if data == "ob_height_skip":
+        context.user_data[_ONB_STEP] = _STEP_WEIGHT
+        await query.edit_message_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
+            "Qual é o teu peso actual? _(em kg, ex: 78.5)_",
+            reply_markup=_skip_keyboard("ob_weight_skip"),
+            parse_mode="Markdown",
+        )
+        return
 
-async def onb_weight_skip(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    rows = [
-        [InlineKeyboardButton(label, callback_data=f"ob_activity:{key}")]
-        for key, label in _ACTIVITY_OPTIONS
-    ]
-    await query.edit_message_text(
-        "*Passo 2 de 4 — Estilo de vida* 🏃\n\n"
-        "Qual é o teu nível de actividade física habitual?",
-        reply_markup=InlineKeyboardMarkup(rows),
-        parse_mode="Markdown",
-    )
-    return ACTIVITY
+    # ── ob_weight_skip ────────────────────────────────
+    if data == "ob_weight_skip":
+        context.user_data[_ONB_STEP] = _STEP_ACTIVITY
+        await query.edit_message_text(
+            "*Passo 2 de 4 — Estilo de vida* 🏃\n\n"
+            "Qual é o teu nível de actividade física habitual?",
+            reply_markup=_activity_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
 
+    # ── ob_activity:* ─────────────────────────────────
+    if data.startswith("ob_activity:") and step == _STEP_ACTIVITY:
+        activity = data.split(":", 1)[1]
+        _onb_data(context)["activity_level"] = activity
+        context.user_data[_ONB_STEP] = _STEP_GOAL
+        await query.edit_message_text(
+            "*Passo 3 de 4 — Objectivo* 🎯\n\n"
+            "Qual é o teu principal objectivo de saúde?",
+            reply_markup=_goal_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
 
-async def _ask_activity(message):
-    rows = [
-        [InlineKeyboardButton(label, callback_data=f"ob_activity:{key}")]
-        for key, label in _ACTIVITY_OPTIONS
-    ]
-    await message.reply_text(
-        "*Passo 2 de 4 — Estilo de vida* 🏃\n\n"
-        "Qual é o teu nível de actividade física habitual?",
-        reply_markup=InlineKeyboardMarkup(rows),
-        parse_mode="Markdown",
-    )
+    # ── ob_goal:* ─────────────────────────────────────
+    if data.startswith("ob_goal:") and step == _STEP_GOAL:
+        goal_key = data.split(":", 1)[1]
+        _onb_data(context)["goal"] = _GOAL_LABEL.get(goal_key, goal_key)
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await query.edit_message_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return
 
-
-async def onb_activity(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    activity = query.data.split(":")[1]
-    context.user_data["onb"]["activity_level"] = activity
-
-    rows = []
-    for i in range(0, len(_GOAL_OPTIONS), 2):
-        row = [
-            InlineKeyboardButton(label, callback_data=f"ob_goal:{key}")
-            for key, label in _GOAL_OPTIONS[i:i + 2]
-        ]
-        rows.append(row)
-
-    await query.edit_message_text(
-        "*Passo 3 de 4 — Objectivo* 🎯\n\n"
-        "Qual é o teu principal objectivo de saúde?",
-        reply_markup=InlineKeyboardMarkup(rows),
-        parse_mode="Markdown",
-    )
-    return GOAL
-
-
-async def onb_goal(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    goal_key = query.data.split(":")[1]
-    goal_label = _GOAL_LABEL.get(goal_key, goal_key)
-    context.user_data["onb"]["goal"] = goal_label
-
-    context.user_data["onb"]["allergies"] = set()
-    await query.edit_message_text(
-        "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-        "Tens alguma alergia ou intolerância alimentar?\n"
-        "_(Selecciona todas as que se aplicam)_",
-        reply_markup=_allergy_keyboard(set()),
-        parse_mode="Markdown",
-    )
-    return ALLERGIES
-
-
-async def onb_allergy_toggle(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Toggle an allergy on/off or select 'none'."""
-    query = update.callback_query
-    await query.answer()
-
-    item = query.data.split(":")[1]
-    selected: set = context.user_data["onb"].get("allergies", set())
-
-    if item == "nenhuma":
-        selected = {"nenhuma"} if "nenhuma" not in selected else set()
-    else:
-        selected.discard("nenhuma")
-        if item in selected:
-            selected.discard(item)
+    # ── ob_allergy:* (toggle) ─────────────────────────
+    if data.startswith("ob_allergy:") and step == _STEP_ALLERGIES:
+        item = data.split(":", 1)[1]
+        selected: set = _onb_data(context).get("allergies", set())
+        if item == "nenhuma":
+            selected = {"nenhuma"} if "nenhuma" not in selected else set()
         else:
-            selected.add(item)
+            selected.discard("nenhuma")
+            selected.discard(item) if item in selected else selected.add(item)
+        _onb_data(context)["allergies"] = selected
+        await query.edit_message_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(selected),
+            parse_mode="Markdown",
+        )
+        return
 
-    context.user_data["onb"]["allergies"] = selected
+    # ── ob_allergy_done ───────────────────────────────
+    if data == "ob_allergy_done" and step == _STEP_ALLERGIES:
+        await _finish_onboarding(query, update, context)
+        return
 
-    await query.edit_message_text(
-        "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-        "Tens alguma alergia ou intolerância alimentar?\n"
-        "_(Selecciona todas as que se aplicam)_",
-        reply_markup=_allergy_keyboard(selected),
-        parse_mode="Markdown",
-    )
-    return ALLERGIES
+    # Stale or out-of-order callback — silently ignore
+    logger.debug("Ignored stale onboarding callback: step=%s data=%s", step, data)
 
 
-async def onb_allergy_done(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Save everything and finish onboarding."""
-    query = update.callback_query
-    await query.answer()
-
+async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Save all collected onboarding data and show the summary."""
     uid = _uid(update)
-    data = context.user_data.get("onb", {})
+    d = _onb_data(context)
 
-    # Save profile to DB
-    update_user_profile(
-        uid,
-        age=data.get("age"),
-        gender=data.get("gender"),
-        height_cm=data.get("height_cm"),
-        weight_kg=data.get("weight_kg"),
-        activity_level=data.get("activity_level"),
-        goal=data.get("goal"),
-    )
+    try:
+        update_user_profile(
+            uid,
+            age=d.get("age"),
+            gender=d.get("gender"),
+            height_cm=d.get("height_cm"),
+            weight_kg=d.get("weight_kg"),
+            activity_level=d.get("activity_level"),
+            goal=d.get("goal"),
+        )
+    except Exception as exc:
+        logger.error("finish_onboarding: could not save profile for %s: %s", uid, exc)
 
-    # Save allergies to ChromaDB
-    allergies = data.get("allergies", set())
-    allergy_list = [a for a in allergies if a != "nenhuma"]
-    for allergy in allergy_list:
-        add_allergy(uid, allergy)
+    allergies = {a for a in d.get("allergies", set()) if a != "nenhuma"}
+    for allergy in allergies:
+        try:
+            add_allergy(uid, allergy)
+        except Exception as exc:
+            logger.warning("finish_onboarding: could not save allergy %s: %s", allergy, exc)
 
-    # Also register goal in ChromaDB
-    if data.get("goal"):
-        add_health_goal(uid, data["goal"])
+    if d.get("goal"):
+        try:
+            add_health_goal(uid, d["goal"])
+        except Exception as exc:
+            logger.warning("finish_onboarding: could not save goal: %s", exc)
 
-    # Build summary
-    gender_icon = "👨" if data.get("gender") == "male" else "👩"
-    activity_label = _ACTIVITY_LABEL.get(data.get("activity_level", ""), "—")
-    height_str = f"{data['height_cm']:.0f} cm" if data.get("height_cm") else "—"
-    weight_str = f"{data['weight_kg']:.1f} kg" if data.get("weight_kg") else "—"
-    allergy_str = ", ".join(allergy_list) if allergy_list else "Nenhuma"
+    # Summary
+    gender_icon = "👨" if d.get("gender") == "male" else "👩"
+    gender_label = "Masculino" if d.get("gender") == "male" else "Feminino"
+    height_str = f"{d['height_cm']:.0f} cm" if d.get("height_cm") else "—"
+    weight_str = f"{d['weight_kg']:.1f} kg" if d.get("weight_kg") else "—"
+    allergy_str = ", ".join(sorted(allergies)) if allergies else "Nenhuma"
+    activity_label = _ACTIVITY_LABEL.get(d.get("activity_level", ""), "—")
 
     summary = (
         f"✅ *Perfil criado com sucesso!*\n\n"
-        f"{gender_icon} Género: {'Masculino' if data.get('gender') == 'male' else 'Feminino'}\n"
-        f"🎂 Idade: {data.get('age_label', '—')}\n"
+        f"{gender_icon} Género: {gender_label}\n"
+        f"🎂 Idade: {d.get('age_label', '—')}\n"
         f"📏 Altura: {height_str}\n"
         f"⚖️ Peso: {weight_str}\n"
         f"🏃 Actividade: {activity_label}\n"
-        f"🎯 Objectivo: {data.get('goal', '—')}\n"
+        f"🎯 Objectivo: {d.get('goal', '—')}\n"
         f"⚠️ Alergias: {allergy_str}\n\n"
         f"A tua equipa já conhece o teu perfil! Começa a conversar 💬\n"
         f"_Podes ver o teu perfil completo com_ /perfil"
     )
 
+    _onb_clear(context)
     await query.edit_message_text(summary, parse_mode="Markdown")
-    context.user_data.pop("onb", None)
-    return ConversationHandler.END
 
 
-async def onb_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Cancel onboarding at any step."""
-    context.user_data.pop("onb", None)
-    await update.message.reply_text(
-        "Onboarding cancelado. Podes reiniciá-lo a qualquer altura com /start.",
-    )
-    return ConversationHandler.END
+# ══════════════════════════════════════════════════════
+# ONBOARDING — TEXT INPUT HANDLER (height / weight)
+# ══════════════════════════════════════════════════════
+
+async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """
+    Handle text input for height/weight steps.
+    Returns True if the message was consumed by onboarding, False otherwise.
+    """
+    step = _onb_step(context)
+
+    if step == _STEP_HEIGHT:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            height = float(text)
+            if not (100 <= height <= 250):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Altura inválida. Insere um valor entre 100 e 250 cm _(ex: 175)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+
+        _onb_data(context)["height_cm"] = height
+        context.user_data[_ONB_STEP] = _STEP_WEIGHT
+        await update.message.reply_text(
+            "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
+            "Qual é o teu peso actual? _(em kg, ex: 78.5)_",
+            reply_markup=_skip_keyboard("ob_weight_skip"),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == _STEP_WEIGHT:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            weight = float(text)
+            if not (30 <= weight <= 300):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 78.5)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+
+        _onb_data(context)["weight_kg"] = weight
+        context.user_data[_ONB_STEP] = _STEP_ACTIVITY
+        await update.message.reply_text(
+            "*Passo 2 de 4 — Estilo de vida* 🏃\n\n"
+            "Qual é o teu nível de actividade física habitual?",
+            reply_markup=_activity_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    return False
 
 
 # ══════════════════════════════════════════════════════
@@ -570,8 +611,13 @@ def _user_error_message(exc: Exception) -> str:
 
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Main handler for text messages. Routes to Agno team."""
+    """Main handler for text messages. Checks onboarding state first."""
     from xai import get_tracker
+
+    # Let onboarding consume height/weight text input if applicable
+    if await _handle_onboarding_text(update, context):
+        return
+
     uid = _uid(update)
     name = _uname(update)
     msg = update.message.text
@@ -666,7 +712,7 @@ async def _send_long(update: Update, text: str, max_len: int = 4000):
         if cut == -1:
             cut = max_len
         parts.append(text[: cut + 1])
-        text = text[cut + 1 :]
+        text = text[cut + 1:]
 
     for part in parts:
         try:
@@ -677,8 +723,16 @@ async def _send_long(update: Update, text: str, max_len: int = 4000):
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
     logger.error("Bot error: %s", context.error, exc_info=context.error)
-    if isinstance(update, Update) and update.message:
-        await update.message.reply_text("❌ Erro inesperado. Tenta novamente.")
+    if not isinstance(update, Update):
+        return
+    msg = "❌ Erro inesperado. Tenta novamente."
+    if update.callback_query:
+        try:
+            await update.callback_query.answer(msg, show_alert=True)
+        except Exception:
+            pass
+    elif update.message:
+        await update.message.reply_text(msg)
 
 
 # ══════════════════════════════════════════════════════
@@ -686,63 +740,28 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════
 
 def create_telegram_app() -> Application:
-    """Create and configure the Telegram Application with all handlers."""
     if not TELEGRAM_BOT_TOKEN:
         raise ValueError("TELEGRAM_BOT_TOKEN not set in .env!")
 
     app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
 
-    # ── Onboarding ConversationHandler ────────────────
-    onboarding = ConversationHandler(
-        entry_points=[CommandHandler("start", cmd_start)],
-        states={
-            WELCOME: [
-                CallbackQueryHandler(onb_welcome, pattern="^ob_(start|skip)$"),
-            ],
-            GENDER: [
-                CallbackQueryHandler(onb_gender, pattern="^ob_gender:"),
-            ],
-            AGE: [
-                CallbackQueryHandler(onb_age, pattern="^ob_age:"),
-            ],
-            HEIGHT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, onb_height),
-                CallbackQueryHandler(onb_height_skip, pattern="^ob_height_skip$"),
-            ],
-            WEIGHT: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, onb_weight),
-                CallbackQueryHandler(onb_weight_skip, pattern="^ob_weight_skip$"),
-            ],
-            ACTIVITY: [
-                CallbackQueryHandler(onb_activity, pattern="^ob_activity:"),
-            ],
-            GOAL: [
-                CallbackQueryHandler(onb_goal, pattern="^ob_goal:"),
-            ],
-            ALLERGIES: [
-                CallbackQueryHandler(onb_allergy_toggle, pattern="^ob_allergy:"),
-                CallbackQueryHandler(onb_allergy_done, pattern="^ob_allergy_done$"),
-            ],
-        },
-        fallbacks=[CommandHandler("cancel", onb_cancel)],
-        allow_reentry=True,
-    )
+    # ── Onboarding inline-keyboard handler (highest priority) ──
+    app.add_handler(CallbackQueryHandler(handle_onboarding_callback, pattern="^ob_"))
 
-    app.add_handler(onboarding)
-
-    # ── Regular command handlers ───────────────────────
-    app.add_handler(CommandHandler("perfil",    cmd_perfil))
-    app.add_handler(CommandHandler("objectivo", cmd_objectivo))
-    app.add_handler(CommandHandler("gosto",     cmd_gosto))
-    app.add_handler(CommandHandler("nao_gosto", cmd_nao_gosto))
-    app.add_handler(CommandHandler("peso",      cmd_peso))
-    app.add_handler(CommandHandler("historico", cmd_historico))
-    app.add_handler(CommandHandler("reset",     cmd_reset))
+    # ── Command handlers ───────────────────────────────
+    app.add_handler(CommandHandler("start",      cmd_start))
+    app.add_handler(CommandHandler("perfil",     cmd_perfil))
+    app.add_handler(CommandHandler("objectivo",  cmd_objectivo))
+    app.add_handler(CommandHandler("gosto",      cmd_gosto))
+    app.add_handler(CommandHandler("nao_gosto",  cmd_nao_gosto))
+    app.add_handler(CommandHandler("peso",       cmd_peso))
+    app.add_handler(CommandHandler("historico",  cmd_historico))
+    app.add_handler(CommandHandler("reset",      cmd_reset))
 
     # ── Free-text message handler ──────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
     app.add_error_handler(error_handler)
 
-    logger.info("✅ Telegram app configured with onboarding flow.")
+    logger.info("✅ Telegram app configured.")
     return app
