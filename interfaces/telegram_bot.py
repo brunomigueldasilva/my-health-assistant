@@ -316,7 +316,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A tua equipa de saúde está pronta:\n"
             f"🥗 *Nutricionista* · 🏋️ *Trainer* · 👨‍🍳 *Chef*\n\n"
             f"Basta enviares uma mensagem ou usar:\n"
-            f"/perfil · /peso · /objectivo · /preferencias · /reset",
+            f"/help · /menu · /perfil · /peso · /objectivo · /preferencias · /reset",
             parse_mode="Markdown",
         )
         return
@@ -336,6 +336,24 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"São apenas *4 passos rápidos* — menos de 1 minuto! ⚡",
         reply_markup=keyboard,
         parse_mode="Markdown",
+    )
+
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "*Comandos disponíveis:*\n\n"
+        "/start - Iniciar o bot e configurar perfil\n"
+        "/perfil - Ver o teu perfil\n"
+        "/preferencias - Gerir preferências (gostos, alergias, etc.)\n"
+        "/objectivo - Definir ou ver objetivos de saúde\n"
+        "/gosto - Adicionar gostos alimentares\n"
+        "/nao_gosto - Adicionar não-gostos\n"
+        "/peso - Registrar peso atual\n"
+        "/historico - Ver histórico de pesos\n"
+        "/reset - Resetar sessão\n"
+        "/help - Mostrar esta ajuda\n"
+        "/menu - Mostrar menu de comandos",
+        parse_mode="Markdown"
     )
 
 
@@ -1039,6 +1057,8 @@ def create_telegram_app() -> Application:
 
     # Commands
     app.add_handler(CommandHandler("start",         cmd_start))
+    app.add_handler(CommandHandler("help",          cmd_help))
+    app.add_handler(CommandHandler("menu",          cmd_help))
     app.add_handler(CommandHandler("perfil",        cmd_perfil))
     app.add_handler(CommandHandler("preferencias",  cmd_preferencias))
     app.add_handler(CommandHandler("objectivo",     cmd_objectivo))
