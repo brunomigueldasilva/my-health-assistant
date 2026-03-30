@@ -5,16 +5,70 @@ User-facing output remains in Portuguese.
 """
 
 import logging
+
+import httpx
+
 from knowledge import get_knowledge_base
 from xai import xai_tool
 
 logger = logging.getLogger(__name__)
 
+_OPEN_FOOD_FACTS_URL = "https://world.openfoodfacts.org/cgi/search.pl"
+
+
+def _search_open_food_facts(food_name: str) -> list[dict]:
+    """
+    Query Open Food Facts API for nutritional data.
+
+    Returns results in the same format as KnowledgeBase.search_nutrition
+    (list of dicts with a 'text' key), so they can be used interchangeably.
+    Returns an empty list on any error or timeout.
+    """
+    try:
+        response = httpx.get(
+            _OPEN_FOOD_FACTS_URL,
+            params={
+                "search_terms": food_name,
+                "json": 1,
+                "page_size": 3,
+                "fields": "product_name,nutriments,quantity",
+            },
+            timeout=5.0,
+        )
+        response.raise_for_status()
+        products = response.json().get("products", [])
+    except Exception as exc:
+        logger.warning("Open Food Facts API unavailable for '%s': %s", food_name, exc)
+        return []
+
+    results = []
+    for product in products[:3]:
+        name = (product.get("product_name") or food_name).strip()
+        if not name:
+            continue
+        n = product.get("nutriments", {})
+        kcal    = round(n.get("energy-kcal_100g") or n.get("energy-kcal") or 0)
+        protein = round(float(n.get("proteins_100g") or 0), 1)
+        carbs   = round(float(n.get("carbohydrates_100g") or 0), 1)
+        fat     = round(float(n.get("fat_100g") or 0), 1)
+        fiber   = round(float(n.get("fiber_100g") or 0), 1)
+
+        parts = [f"{name}: {kcal} kcal/100g"]
+        parts.append(f"Proteína: {protein}g · Carboidratos: {carbs}g · Gordura: {fat}g")
+        if fiber:
+            parts.append(f"Fibra: {fiber}g")
+        results.append({"text" : " — ".join(parts), "metadata": {"source": "Open Food Facts"}})
+
+    logger.info("Open Food Facts: %d result(s) for '%s'", len(results), food_name)
+    return results
+
 
 @xai_tool
 def search_food_nutrition(food_name: str) -> str:
     """
-    Search nutritional information for a food item in the knowledge base.
+    Search nutritional information for a food item.
+    Checks the local knowledge base first; falls back to Open Food Facts API
+    when no local data is found.
 
     Args:
         food_name: Name of the food to search (e.g. "chicken breast", "brown rice")
@@ -25,10 +79,19 @@ def search_food_nutrition(food_name: str) -> str:
     kb = get_knowledge_base()
     results = kb.search_nutrition(food_name, n_results=3)
 
-    if not results:
-        return f"Não encontrei informação nutricional sobre '{food_name}' na base de dados. Usa conhecimento geral."
+    if results:
+        return "\n".join(f"• {r['text']}" for r in results)
 
-    return "\n".join(f"• {r['text']}" for r in results)
+    # Fallback: query Open Food Facts (3+ million products)
+    api_results = _search_open_food_facts(food_name)
+    if api_results:
+        header = f"🌐 Informação nutricional via Open Food Facts para '{food_name}':\n"
+        return header + "\n".join(f"• {r['text']}" for r in api_results)
+
+    return (
+        f"Não encontrei informação nutricional sobre '{food_name}' "
+        "na base de dados local nem na Open Food Facts. Usa conhecimento geral."
+    )
 
 
 @xai_tool
@@ -81,10 +144,13 @@ def calculate_daily_calories(
     Returns:
         Detailed calorie and macro calculation
     """
-    if gender.lower() in ("masculino", "m", "male"):
+    _g = gender.lower()
+    if _g in ("masculino", "m", "male"):
         bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age + 5
-    else:
+    elif _g in ("feminino", "f", "female"):
         bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 161
+    else:  # "other" / prefiro não dizer — média das duas fórmulas
+        bmr = 10 * weight_kg + 6.25 * height_cm - 5 * age - 78
 
     multipliers = {
         "sedentary": 1.2, "sedentario": 1.2,

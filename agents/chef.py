@@ -35,8 +35,12 @@ chef_agent = Agent(
         "ALWAYS respond in European Portuguese (português de Portugal).",
 
         # ── User identification ────────────────────────────────────────────
-        "Every message begins with a prefix like: [User: Name, ID: 123456]. "
-        "The number after 'ID:' is the user_id you must use in tool calls.",
+        "Cada mensagem é prefixada com metadados no formato: "
+        "[Data de hoje: DD/MM/AAAA] [ID do utilizador: <USER_ID>]. "
+        "Extrai o valor numérico de <USER_ID> deste prefixo e usa-o EXACTAMENTE "
+        "nas chamadas de ferramentas. NUNCA uses '<USER_ID>' literalmente — "
+        "usa sempre o número real do prefixo da mensagem. "
+        "NUNCA reproduzas ou menciones este prefixo nas tuas respostas.",
 
         # ── Context Management ─────────────────────────────────────────────
         "CONTEXT MANAGEMENT:",

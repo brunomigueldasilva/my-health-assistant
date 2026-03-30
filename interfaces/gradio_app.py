@@ -54,6 +54,16 @@ def _reset_session(uid: str) -> str:
     return _user_sessions[uid]
 
 
+def _sanitize_reply(text: str) -> str:
+    """Replace raw API errors with user-friendly messages."""
+    t = text.lower()
+    if "429" in t or "too many requests" in t or "resource_exhausted" in t or "quota" in t:
+        return "De momento estou com muitos pedidos em simultâneo. Por favor, aguarda uns segundos e tenta novamente. 🙏"
+    if "bound method" in t or "clientresponse" in t or "exception" in t or "traceback" in t:
+        return "Ocorreu um problema ao processar o teu pedido. Por favor, tenta novamente. 🙏"
+    return text
+
+
 def _extract_text(response) -> str:
     if response is None:
         return ""
@@ -80,6 +90,8 @@ def _extract_text(response) -> str:
 def _db_conn(path) -> sqlite3.Connection:
     conn = sqlite3.connect(str(path))
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     return conn
 
 
@@ -92,7 +104,7 @@ def list_users():
     try:
         conn = _db_conn(SQLITE_DB)
         rows = conn.execute(
-            "SELECT user_id, name FROM user_profiles ORDER BY name, user_id"
+            "SELECT user_id, name FROM user_profiles ORDER BY name IS NULL, name, user_id"
         ).fetchall()
         conn.close()
         choices = []
@@ -104,8 +116,8 @@ def list_users():
         return []
 
 
-def check_user_status(uid: str) -> str:
-    uid = uid.strip()
+def check_user_status(uid) -> str:
+    uid = (uid or "").strip()
     if not uid:
         return ""
     try:
@@ -145,7 +157,8 @@ async def chat_fn(message: str, history: list, user_id: str):
     yield history + [user_msg, {"role": "assistant", "content": "⏳ A processar…"}], tracker.generate_markdown(), ""
 
     uid = user_id.strip()
-    enriched = f"[User: User, ID: {uid}]\n{message}"
+    today = datetime.now().strftime("%d/%m/%Y")
+    enriched = f"[Data de hoje: {today}] [ID do utilizador: {uid}]\n{message}"
     session_id = _get_session(uid)
 
     try:
@@ -154,8 +167,10 @@ async def chat_fn(message: str, history: list, user_id: str):
         reply = _extract_text(response)
         if not reply:
             reply = "Desculpa, não consegui processar. Tenta reformular. 🤔"
+        else:
+            reply = _sanitize_reply(reply)
     except Exception as e:
-        reply = f"❌ Erro: {str(e)[:300]}"
+        reply = _sanitize_reply(str(e))
 
     yield history + [
         user_msg,
@@ -173,37 +188,58 @@ def reset_chat(user_id: str):
 # TAB 2 — PERFIL
 # ═══════════════════════════════════════════════════════
 
-def load_profile(user_id: str):
-    uid = user_id.strip()
+def load_profile(user_id):
+    uid = (user_id or "").strip()
     if not uid:
-        return ("", None, "", None, None, "", "")
+        return ("", "", "", "", None, None, None, "")
     conn = _db_conn(SQLITE_DB)
     row = conn.execute(
         "SELECT * FROM user_profiles WHERE user_id = ?", (uid,)
     ).fetchone()
     conn.close()
     if not row:
-        return ("", None, "", None, None, "", "")
+        return ("", "", "", "", None, None, None, "")
+    # Format birth_date as DD/MM/YYYY for display
+    bd_iso = row["birth_date"] or ""
+    bd_display = bd_iso
+    if bd_iso:
+        try:
+            bd_display = datetime.strptime(bd_iso[:10], "%Y-%m-%d").strftime("%d/%m/%Y")
+        except Exception:
+            pass
+    from tools.profile_tools import _age_from_birth_date
+    age = _age_from_birth_date(bd_iso)
+    age_str = f"{age} anos" if age is not None else ""
     return (
         row["name"] or "",
-        row["age"],
-        row["gender"] or "",
+        bd_display,
+        age_str,
+        row["gender"] or None,
         row["height_cm"],
         row["weight_kg"],
-        row["activity_level"] or "",
+        row["activity_level"] or None,
         row["goal"] or "",
     )
 
 
-def save_profile(user_id, name, age, gender, height_cm, weight_kg, activity_level, goal):
+def save_profile(user_id, name, birth_date_str, gender, height_cm, weight_kg, activity_level, goal):
     uid = user_id.strip()
     if not uid:
         return "❌ Introduz um User ID."
     try:
+        birth_date_iso = None
+        if birth_date_str and str(birth_date_str).strip():
+            bd = str(birth_date_str).strip()
+            for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+                try:
+                    birth_date_iso = datetime.strptime(bd, fmt).strftime("%Y-%m-%d")
+                    break
+                except ValueError:
+                    continue
         update_user_profile(
             uid,
             name=name or None,
-            age=int(age) if age else None,
+            birth_date=birth_date_iso,
             gender=gender or None,
             height_cm=float(height_cm) if height_cm else None,
             weight_kg=float(weight_kg) if weight_kg else None,
@@ -215,25 +251,486 @@ def save_profile(user_id, name, age, gender, height_cm, weight_kg, activity_leve
         return f"❌ Erro: {e}"
 
 
-def load_weight_chart(user_id: str):
-    uid = user_id.strip()
+def load_weight_chart(user_id, period: str = "Último Ano") -> str:
+    import html as _html
+    import json
+    from datetime import datetime, timedelta
+
+    uid = (user_id or "").strip()
+    _empty = (
+        "<div style='color:#64748b;padding:60px;text-align:center;"
+        "background:#0f172a;border-radius:12px;font-family:Inter,sans-serif'>"
+        "Sem dados de peso. Regista o primeiro valor acima.</div>"
+    )
     if not uid:
-        return None
+        return ""
+
     conn = _db_conn(SQLITE_DB)
     rows = conn.execute(
         """SELECT recorded_at, weight_kg FROM weight_history
-           WHERE user_id = ? ORDER BY recorded_at ASC LIMIT 50""",
+           WHERE user_id = ? ORDER BY recorded_at ASC""",
         (uid,),
     ).fetchall()
     conn.close()
+
     if not rows:
-        return None
-    import pandas as pd
-    df = pd.DataFrame(
-        [(r["recorded_at"][:19].replace("T", " "), r["weight_kg"]) for r in rows],
-        columns=["Data", "Peso (kg)"],
+        return _empty
+
+    all_data = [(r["recorded_at"][:10], float(r["weight_kg"])) for r in rows]
+
+    if period == "Últimas 10":
+        data = all_data[-10:]
+    else:
+        period_days = {
+            "Último Mês": 30,
+            "Últimos 6 Meses": 180,
+            "Último Ano": 365,
+            "Últimos 5 Anos": 1825,
+        }
+        days = period_days.get(period, 365)
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        data = [(d, w) for d, w in all_data if d >= cutoff]
+
+    if not data:
+        return _empty
+
+    labels_json = json.dumps([d for d, _ in data])
+    weights_json = json.dumps([w for _, w in data])
+
+    inner = f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #0f172a; overflow: hidden; font-family: Inter, sans-serif; }}
+  .wrap {{ background: #0f172a; padding: 14px 18px 10px; height: 100vh;
+           display: flex; flex-direction: column; gap: 10px; }}
+  .header {{ display: flex; justify-content: space-between; align-items: baseline; }}
+  .title {{ color: #cbd5e1; font: 600 12px/1 Inter, sans-serif; letter-spacing: .08em; }}
+  .hint {{ color: #334155; font-size: 10px; }}
+  canvas {{ flex: 1; min-height: 0; }}
+  .info-wrap {{ display: inline-flex; align-items: center; gap: 6px; }}
+  .info-btn {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 16px; height: 16px; border-radius: 50%;
+    background: rgba(203,213,225,0.15); color: #94a3b8;
+    font: 600 10px/1 Inter, sans-serif; cursor: pointer;
+    border: 1px solid rgba(203,213,225,0.25); user-select: none;
+    transition: background .2s;
+  }}
+  .info-btn:hover {{ background: rgba(203,213,225,0.3); }}
+  .info-overlay {{
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15,23,42,0.97); padding: 14px 18px; overflow-y: auto;
+    color: #cbd5e1; font: 400 12px/1.75 Inter,sans-serif; z-index: 100; cursor: default;
+  }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="info-wrap">
+      <span class="title">TRENDS</span>
+      <span class="info-btn" id="info-btn">i</span>
+    </div>
+    <span class="hint">scroll → zoom &nbsp;·&nbsp; arrastar → mover &nbsp;·&nbsp; duplo clique → repor</span>
+  </div>
+  <canvas id="c"></canvas>
+</div>
+<div id="info-overlay" class="info-overlay">Weight is the total mass of your body in kilo&#39;s/pounds. This measurement includes all of the elements of your body hence bones, blood, organs, muscles, and fat. Your weight is determined by different factors including hereditary components, hormonal abnormalities, exercise, diet, and lifestyle. Being underweight or overweight can significantly impact your physical and psychological wellbeing. However, weight only will not give you any indication as to how much of your weight is muscle and how much is fat. Therefore, a complete picture of your health can only be obtained through an accurate body composition monitor checking different measurements other than body weight.</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script>
+const labels  = {labels_json};
+const weights = {weights_json};
+
+const crosshair = {{
+  id: 'crosshair',
+  afterDraw(chart) {{
+    if (!chart._ch) return;
+    const {{ctx, chartArea: {{left, right, top, bottom}}}} = chart;
+    const {{x, y}} = chart._ch;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(203,213,225,0.2)';
+    ctx.lineWidth = 1;
+    ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(x, top);  ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y);  ctx.stroke();
+    ctx.restore();
+  }}
+}};
+
+const canvas = document.getElementById('c');
+const chart  = new Chart(canvas, {{
+  type: 'line',
+  plugins: [crosshair],
+  data: {{
+    labels,
+    datasets: [{{
+      data: weights,
+      borderColor: '#e11d48',
+      borderWidth: 2,
+      pointBackgroundColor: 'white',
+      pointBorderColor: '#e11d48',
+      pointBorderWidth: 1.5,
+      pointRadius: 4,
+      pointHoverRadius: 7,
+      fill: true,
+      backgroundColor(ctx) {{
+        const g = ctx.chart.ctx.createLinearGradient(0, 0, 0, (ctx.chart.chartArea || {{}}).bottom || 300);
+        g.addColorStop(0, 'rgba(225,29,72,0.35)');
+        g.addColorStop(1, 'rgba(225,29,72,0.02)');
+        return g;
+      }},
+      tension: 0.25,
+    }}]
+  }},
+  options: {{
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: {{ mode: 'index', intersect: false }},
+    animation: {{ duration: 350 }},
+    plugins: {{
+      legend: {{ display: false }},
+      tooltip: {{
+        backgroundColor: '#1e293b',
+        borderColor: '#334155',
+        borderWidth: 1,
+        titleColor: '#94a3b8',
+        bodyColor: '#f9fafb',
+        bodyFont: {{ size: 13, weight: '600' }},
+        padding: 10,
+        callbacks: {{ label: (i) => ` ${{i.raw.toFixed(1)}} kg` }}
+      }},
+      zoom: {{
+        zoom: {{ wheel: {{ enabled: true }}, pinch: {{ enabled: true }}, mode: 'x' }},
+        pan:  {{ enabled: true, mode: 'x' }},
+      }}
+    }},
+    scales: {{
+      x: {{
+        ticks: {{ color: '#475569', maxTicksLimit: 8, maxRotation: 0, font: {{ size: 11 }} }},
+        grid:  {{ color: 'rgba(255,255,255,0.05)' }},
+        border: {{ color: 'rgba(255,255,255,0.08)' }},
+      }},
+      y: {{
+        ticks: {{ color: '#475569', font: {{ size: 11 }}, callback: v => v + ' kg' }},
+        grid:  {{ color: 'rgba(255,255,255,0.05)' }},
+        border: {{ color: 'rgba(255,255,255,0.08)' }},
+      }}
+    }}
+  }}
+}});
+
+canvas.addEventListener('mousemove', (e) => {{
+  const r = canvas.getBoundingClientRect();
+  chart._ch = {{ x: e.clientX - r.left, y: e.clientY - r.top }};
+  chart.draw();
+}});
+canvas.addEventListener('mouseleave', () => {{
+  chart._ch = null;
+  chart.draw();
+}});
+
+(function() {{
+  var btn = document.getElementById('info-btn');
+  var overlay = document.getElementById('info-overlay');
+  var hideT;
+  if (!btn || !overlay) return;
+  btn.addEventListener('mouseenter', function() {{ clearTimeout(hideT); overlay.style.display = 'block'; }});
+  btn.addEventListener('mouseleave', function() {{ hideT = setTimeout(function() {{ overlay.style.display = 'none'; }}, 150); }});
+  overlay.addEventListener('mouseenter', function() {{ clearTimeout(hideT); }});
+  overlay.addEventListener('mouseleave', function() {{ overlay.style.display = 'none'; }});
+}})();
+</script>
+</body>
+</html>"""
+
+    escaped = _html.escape(inner, quote=True)
+    return f'<iframe srcdoc="{escaped}" style="width:100%;height:380px;border:none;border-radius:12px;display:block;"></iframe>'
+
+
+# ── Body composition charts ─────────────────────────────────────────────────
+
+_COMP_METRICS = {
+    "bmi", "body_fat_pct", "visceral_fat", "muscle_mass_kg",
+    "muscle_quality", "bone_mass_kg", "bmr_kcal", "metabolic_age",
+    "body_water_pct", "physique_rating",
+}
+
+_INFO_BODY_WATER = (
+    "Body water is an essential part of staying healthy. Over half the body consists of water. "
+    "It regulates body temperature and helps eliminate waste. You lose water continuously through "
+    "urine, sweat and breathing, so it&#39;s important to keep replacing it. The amount of fluid "
+    "needed every day varies from person to person and is affected by climatic conditions and how "
+    "much physical activity you undertake. Being well hydrated helps concentration levels, sports "
+    "performance and general wellbeing. Experts recommend that you should drink at least two litres "
+    "of fluid each day, preferably water or other low calorie drinks. If you are training, it&#39;s "
+    "important to increase your fluid intake to ensure peak performance at all times. "
+    "Read all about body water. "
+    "The average TBW% ranges for a healthy person are: Female 45 to 60% Male 50 to 65%"
+)
+_INFO_BODY_FAT = (
+    "Body fat percentage is the proportion of your total body weight that consists of fat tissue. "
+    "Your body needs a certain amount of essential fat to maintain life and reproductive functions — "
+    "fat also surrounds and protects internal organs. As your activity level changes, the balance of "
+    "body fat and muscle mass will gradually change, which affects your overall physique. "
+    "A high body fat percentage increases the risk of cardiovascular disease, type 2 diabetes and "
+    "other metabolic conditions. Reducing body fat through exercise and a balanced diet improves "
+    "health markers and energy levels. The physique rating provided by your Body Composition Monitor "
+    "gives you insight into what body type you currently have based on the balance between body fat "
+    "and muscle mass. "
+    "Typical healthy body fat ranges — Female: 20–35% · Male: 8–24%"
+)
+_INFO_BMI = (
+    "Your BMI can be calculated by dividing your weight (in kilograms) by the square of your height "
+    "(in meters). BMI is a good general indicator for population studies but has serious limitation "
+    "when assessing on an individual level."
+)
+_INFO_VISCERAL_FAT = (
+    "Visceral fat is located deep in the core abdominal area, surrounding and protecting the vital "
+    "organs. Even if your weight and body fat remains constant, as you get older the distribution of "
+    "fat changes and is more likely to shift to the abdominal area. Ensuring you have a healthy level "
+    "of visceral fat directly reduces the risk of certain diseases such as heart disease, high blood "
+    "pressure and may delay the onset of type 2 diabetes. Measuring your visceral fat with a body "
+    "composition monitor helps you keep track of potential problems and test the effectiveness of "
+    "your diet or training."
+)
+_INFO_MUSCLE_MASS = (
+    "Muscle mass includes the skeletal muscles, smooth muscles such as cardiac and digestive muscles "
+    "and the water contained in these muscles. Muscles act as an engine in consuming energy. As your "
+    "muscle mass increases, the rate at which you burn energy (calories) increases which accelerates "
+    "your basal metabolic rate (BMR) and helps you reduce excess body fat levels and lose weight in a "
+    "healthy way. If you are exercising hard your muscle mass will increase and may increase your total "
+    "body weight too. That&#39;s why it&#39;s important to monitor your measurements regularly to see "
+    "the impact of your training programme on your muscle mass."
+)
+_INFO_BONE_MASS = (
+    "The predicted weight of bone mineral in your body. While your bone mass is unlikely to undergo "
+    "noticeable changes in the short term, it&#39;s important to maintain healthy bones by having a "
+    "balanced diet rich in calcium and by doing plenty of weight-bearing exercise. You should track "
+    "your bone mass over time and look for any long-term changes."
+)
+_INFO_BMR = (
+    "Increasing muscle mass will speed up your basal metabolic rate (BMR). A person with a high BMR "
+    "burns more calories at rest than a person with a low BMR. About 70% of calories consumed every "
+    "day are used for your basal metabolism. Increasing your muscle mass helps raise your BMR, which "
+    "increases the number of calories you burn and helps to decrease body fat levels. Your BMR "
+    "measurement can be used as a minimum baseline for a diet programme. Additional calories can be "
+    "included depending on your activity level. The more active you are the more calories you burn "
+    "and the more muscle you build, so you need to ensure you consume enough calories to keep your "
+    "body fit and healthy. As people age their metabolic rate changes. Basal metabolism rises as a "
+    "child matures and peaks at around 16 or 17, after which point it typically starts to decrease. "
+    "A slow BMR will make it harder to lose body fat and overall weight."
+)
+_INFO_METABOLIC_AGE = (
+    "Compares your BMR to an average for your age group. This is calculated by comparing your basal "
+    "metabolic rate (BMR) to the BMR average of your chronological age group. If your metabolic age "
+    "is higher than your actual age, it&#39;s an indication that you need to improve your metabolic "
+    "rate. Increased exercise will build healthy muscle tissue, which in turn will improve your "
+    "metabolic age. Stay on track by monitoring regularly."
+)
+
+
+def load_composition_chart(
+    user_id: str, metric: str, label: str, unit: str,
+    period: str = "Último Ano", color: str = "#6366f1",
+    info_text: str = "",
+) -> str:
+    import html as _html
+    import json
+    from datetime import datetime, timedelta
+
+    uid = user_id.strip()
+    if not uid or metric not in _COMP_METRICS:
+        return ""
+
+    conn = _db_conn(SQLITE_DB)
+    rows = conn.execute(
+        f"SELECT measured_at, {metric} FROM body_composition_history "
+        f"WHERE user_id = ? AND {metric} IS NOT NULL ORDER BY measured_at ASC",
+        (uid,),
+    ).fetchall()
+    conn.close()
+
+    _no_data = (
+        f"<div style='color:#475569;padding:30px;text-align:center;"
+        f"background:#0f172a;border-radius:12px;font:12px Inter,sans-serif'>"
+        f"{label}: sem dados</div>"
     )
-    return df
+    if not rows:
+        return _no_data
+
+    all_data = [(r["measured_at"][:10], float(r[metric])) for r in rows]
+    if period == "Últimas 10":
+        data = all_data[-10:]
+    else:
+        period_days = {"Último Mês": 30, "Últimos 6 Meses": 180, "Último Ano": 365, "Últimos 5 Anos": 1825}
+        days = period_days.get(period, 365)
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        data = [(d, v) for d, v in all_data if d >= cutoff]
+
+    if not data:
+        return _no_data
+
+    labels_json = json.dumps([d for d, _ in data])
+    values_json = json.dumps([v for _, v in data])
+    unit_js = json.dumps(unit)
+    decimals = 0 if metric in ("metabolic_age", "physique_rating") else 1
+
+    inner = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: #0f172a; overflow: hidden; }}
+  .wrap {{ background: #0f172a; padding: 10px 14px 6px; height: 100vh;
+           display: flex; flex-direction: column; gap: 6px; }}
+  .title-row {{ display: flex; align-items: center; gap: 5px; }}
+  .title {{ color: #cbd5e1; font: 600 11px/1 Inter, sans-serif; letter-spacing: .06em; }}
+  canvas {{ flex: 1; min-height: 0; }}
+  .info-wrap {{ display: inline-flex; align-items: center; }}
+  .info-btn {{
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 14px; height: 14px; border-radius: 50%;
+    background: rgba(203,213,225,0.15); color: #94a3b8;
+    font: 600 9px/1 Inter, sans-serif; cursor: pointer;
+    border: 1px solid rgba(203,213,225,0.25); user-select: none;
+    transition: background .2s;
+  }}
+  .info-btn:hover {{ background: rgba(203,213,225,0.3); }}
+  .info-overlay {{
+    display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(15,23,42,0.97); padding: 12px 14px; overflow-y: auto;
+    color: #cbd5e1; font: 400 11px/1.75 Inter,sans-serif; z-index: 100; cursor: default;
+  }}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="title-row">
+    <span class="title">{label.upper()}</span>
+    {"<span class='info-btn' id='info-btn'>i</span>" if info_text else ""}
+  </div>
+  <canvas id="c"></canvas>
+</div>
+{"<div id='info-overlay' class='info-overlay'>" + info_text + "</div>" if info_text else ""}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/hammerjs@2.0.8/hammer.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
+<script>
+const labels  = {labels_json};
+const values  = {values_json};
+const unit    = {unit_js};
+const dec     = {decimals};
+const col     = '{color}';
+
+const crosshair = {{
+  id: 'crosshair',
+  afterDraw(chart) {{
+    if (!chart._ch) return;
+    const {{ctx, chartArea: {{left, right, top, bottom}}}} = chart;
+    const {{x, y}} = chart._ch;
+    ctx.save();
+    ctx.strokeStyle = 'rgba(203,213,225,0.18)';
+    ctx.lineWidth = 1; ctx.setLineDash([5, 4]);
+    ctx.beginPath(); ctx.moveTo(x, top);  ctx.lineTo(x, bottom); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(left, y); ctx.lineTo(right, y);  ctx.stroke();
+    ctx.restore();
+  }}
+}};
+
+const canvas = document.getElementById('c');
+const chart  = new Chart(canvas, {{
+  type: 'line', plugins: [crosshair],
+  data: {{
+    labels,
+    datasets: [{{
+      data: values,
+      borderColor: col, borderWidth: 2,
+      pointBackgroundColor: 'white', pointBorderColor: col,
+      pointBorderWidth: 1.5, pointRadius: 3, pointHoverRadius: 6,
+      fill: true,
+      backgroundColor(ctx) {{
+        const ca = ctx.chart.chartArea || {{}};
+        const g = ctx.chart.ctx.createLinearGradient(0, ca.top||0, 0, ca.bottom||200);
+        g.addColorStop(0, col + '55'); g.addColorStop(1, col + '08');
+        return g;
+      }},
+      tension: 0.25,
+    }}]
+  }},
+  options: {{
+    responsive: true, maintainAspectRatio: false,
+    interaction: {{ mode: 'index', intersect: false }},
+    animation: {{ duration: 300 }},
+    plugins: {{
+      legend: {{ display: false }},
+      tooltip: {{
+        backgroundColor: '#1e293b', borderColor: '#334155', borderWidth: 1,
+        titleColor: '#94a3b8', bodyColor: '#f9fafb',
+        bodyFont: {{ size: 12, weight: '600' }}, padding: 8,
+        callbacks: {{ label: (i) => ` ${{i.raw.toFixed(dec)}}${{unit ? ' '+unit : ''}}` }}
+      }},
+      zoom: {{
+        zoom: {{ wheel: {{ enabled: true }}, pinch: {{ enabled: true }}, mode: 'x' }},
+        pan:  {{ enabled: true, mode: 'x' }},
+      }}
+    }},
+    scales: {{
+      x: {{
+        ticks: {{ color: '#475569', maxTicksLimit: 5, maxRotation: 0, font: {{ size: 10 }} }},
+        grid: {{ color: 'rgba(255,255,255,0.04)' }}, border: {{ color: 'rgba(255,255,255,0.06)' }},
+      }},
+      y: {{
+        ticks: {{ color: '#475569', font: {{ size: 10 }},
+                  callback: v => v.toFixed(dec) + (unit ? ' '+unit : '') }},
+        grid: {{ color: 'rgba(255,255,255,0.04)' }}, border: {{ color: 'rgba(255,255,255,0.06)' }},
+      }}
+    }}
+  }}
+}});
+
+canvas.addEventListener('mousemove', (e) => {{
+  const r = canvas.getBoundingClientRect();
+  chart._ch = {{ x: e.clientX - r.left, y: e.clientY - r.top }};
+  chart.draw();
+}});
+canvas.addEventListener('mouseleave', () => {{ chart._ch = null; chart.draw(); }});
+
+(function() {{
+  var btn = document.getElementById('info-btn');
+  var overlay = document.getElementById('info-overlay');
+  var hideT;
+  if (!btn || !overlay) return;
+  btn.addEventListener('mouseenter', function() {{ clearTimeout(hideT); overlay.style.display = 'block'; }});
+  btn.addEventListener('mouseleave', function() {{ hideT = setTimeout(function() {{ overlay.style.display = 'none'; }}, 150); }});
+  overlay.addEventListener('mouseenter', function() {{ clearTimeout(hideT); }});
+  overlay.addEventListener('mouseleave', function() {{ overlay.style.display = 'none'; }});
+}})();
+</script>
+</body></html>"""
+
+    escaped = _html.escape(inner, quote=True)
+    return f'<iframe srcdoc="{escaped}" style="width:100%;height:230px;border:none;border-radius:12px;display:block;"></iframe>'
+
+
+def load_all_comp_charts(user_id, period: str = "Último Ano") -> tuple:
+    uid = (user_id or "").strip()
+    if not uid:
+        return ("",) * 8
+    return (
+        load_composition_chart(uid, "bmi",           "IMC (BMI)",         "",     period, "#8b5cf6", _INFO_BMI),
+        load_composition_chart(uid, "body_fat_pct",  "Gordura Corporal",  "%",    period, "#f59e0b", _INFO_BODY_FAT),
+        load_composition_chart(uid, "visceral_fat",  "Gordura Visceral",  "",     period, "#f97316", _INFO_VISCERAL_FAT),
+        load_composition_chart(uid, "muscle_mass_kg","Massa Muscular",    "kg",   period, "#3b82f6", _INFO_MUSCLE_MASS),
+        load_composition_chart(uid, "body_water_pct","Água Corporal",     "%",    period, "#06b6d4", _INFO_BODY_WATER),
+        load_composition_chart(uid, "bmr_kcal",      "BMR",               "kcal", period, "#10b981", _INFO_BMR),
+        load_composition_chart(uid, "metabolic_age", "Idade Metabólica",  "anos", period, "#ec4899", _INFO_METABOLIC_AGE),
+        load_composition_chart(uid, "bone_mass_kg",  "Massa Óssea",       "kg",   period, "#14b8a6", _INFO_BONE_MASS),
+    )
 
 
 def gdpr_export_fn(user_id: str):
@@ -250,7 +747,7 @@ def gdpr_export_fn(user_id: str):
 
 def gdpr_delete_fn(user_id: str):
     uid = user_id.strip()
-    empty_profile = ("", None, "", None, None, "", "")
+    empty_profile = ("", "", "", None, None, None, None, "")
     if not uid:
         return ("❌ Introduz um User ID.", *empty_profile, None)
     try:
@@ -261,9 +758,9 @@ def gdpr_delete_fn(user_id: str):
         return (f"❌ Erro: {e}", *empty_profile, None)
 
 
-def add_weight_entry(user_id: str, weight_str: str):
+def add_weight_entry(user_id: str, weight_str: str, period: str = "Último Ano"):
     uid = user_id.strip()
-    empty_profile = ("", None, "", None, None, "", "")
+    empty_profile = ("", "", "", None, None, None, None, "")
     if not uid:
         return ("❌ Introduz um User ID.", None, weight_str, *empty_profile)
     try:
@@ -275,7 +772,7 @@ def add_weight_entry(user_id: str, weight_str: str):
     try:
         update_user_profile(uid, weight_kg=weight)
         profile = load_profile(uid)
-        return (f"✅ Peso {weight} kg registado!", load_weight_chart(uid), None, *profile)
+        return (f"✅ Peso {weight} kg registado!", load_weight_chart(uid, period), None, *profile)
     except Exception as e:
         return (f"❌ Erro: {e}", None, weight_str, *empty_profile)
 
@@ -321,9 +818,9 @@ def _delete_pref_exact(uid: str, doc_text: str) -> bool:
     return False
 
 
-def load_all_prefs(uid: str):
+def load_all_prefs(uid):
     """Returns a gr.update for each of the 6 preference CheckboxGroups."""
-    uid = uid.strip()
+    uid = (uid or "").strip()
     return tuple(
         gr.update(choices=_load_category_list(uid, cat), value=[])
         for cat in _PREF_CATS
@@ -494,7 +991,7 @@ def load_sessions(user_id_filter: str = ""):
         run_count = len(runs) if isinstance(runs, list) else 0
         ts_updated = r["updated_at"]
         if isinstance(ts_updated, int):
-            ts_updated = datetime.fromtimestamp(ts_updated / 1000).strftime("%Y-%m-%d %H:%M")
+            ts_updated = datetime.fromtimestamp(ts_updated).strftime("%Y-%m-%d %H:%M")
         data.append([
             r["session_id"][:20] + "…" if len(r["session_id"]) > 20 else r["session_id"],
             r["user_id"] or "",
@@ -735,8 +1232,10 @@ def get_dashboard_html(user_id: str):
 
     # Get TDEE from nutrition tools logic
     try:
+        from tools.profile_tools import _age_from_birth_date
+        age = _age_from_birth_date(row["birth_date"]) or 30
         tdee_text = calculate_daily_calories(
-            row["weight_kg"], row["height_cm"], row["age"] or 30,
+            row["weight_kg"], row["height_cm"], age,
             row["gender"] or "male", row["activity_level"] or "moderate",
             row["goal"] or "maintain"
         )
@@ -774,10 +1273,10 @@ def check_onboarding_needed(user_id: str):
         return gr.update(visible=False)
     conn = _db_conn(SQLITE_DB)
     row = conn.execute(
-        "SELECT age, gender, height_cm, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
+        "SELECT birth_date, gender, height_cm, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
     ).fetchone()
     conn.close()
-    is_complete = bool(row and row["age"] and row["gender"] and row["height_cm"] and row["weight_kg"])
+    is_complete = bool(row and row["birth_date"] and row["gender"] and row["height_cm"] and row["weight_kg"])
     return gr.update(visible=not is_complete)
 
 
@@ -878,9 +1377,10 @@ with gr.Blocks(title="Health Assistant") as demo:
                 with gr.Row():
                     with gr.Column():
                         pf_name = gr.Textbox(label="Nome")
-                        pf_age = gr.Number(label="Idade", precision=0)
+                        pf_birth_date = gr.Textbox(label="Data de Nascimento", placeholder="DD/MM/AAAA")
+                        pf_age = gr.Textbox(label="Idade (calculada)", interactive=False, placeholder="—")
                         pf_gender = gr.Radio(
-                            choices=[("Masculino", "male"), ("Feminino", "female")],
+                            choices=[("Masculino", "male"), ("Feminino", "female"), ("Outro / Prefiro não dizer", "other")],
                             label="Género",
                         )
                     with gr.Column():
@@ -897,19 +1397,42 @@ with gr.Blocks(title="Health Assistant") as demo:
                             label="Nível de Atividade",
                         )
                 pf_goal = gr.Textbox(label="Objetivo principal", lines=2)
-
             with gr.Accordion("📈 Evolução de Peso", open=False):
                 with gr.Row(elem_classes="weight-row"):
                     new_weight = gr.Textbox(show_label=False, placeholder="Novo peso (kg)  ex: 74.8", scale=3, min_width=200)
                     add_weight_btn = gr.Button("Registar", variant="primary", scale=1, min_width=120)
                 weight_status = gr.Markdown()
-                weight_chart = gr.LinePlot(
-                    x="Data",
-                    y="Peso (kg)",
-                    title="Histórico de Peso",
-                    height=300,
-                    show_label=False,
+                weight_period = gr.Dropdown(
+                    choices=["Últimas 10", "Último Mês", "Últimos 6 Meses", "Último Ano", "Últimos 5 Anos"],
+                    value="Último Ano",
+                    label="Período",
+                    interactive=True,
+                    elem_classes="period-selector",
                 )
+                weight_chart = gr.HTML()
+
+            with gr.Accordion("📊 Composição Corporal", open=False):
+                gr.Markdown(
+                    "_Fonte: **MyTanita**_",
+                )
+                comp_period = gr.Dropdown(
+                    choices=["Últimas 10", "Último Mês", "Últimos 6 Meses", "Último Ano", "Últimos 5 Anos"],
+                    value="Último Ano",
+                    label="Período",
+                    interactive=True,
+                )
+                with gr.Row():
+                    chart_bmi      = gr.HTML()
+                    chart_fat      = gr.HTML()
+                with gr.Row():
+                    chart_visceral = gr.HTML()
+                    chart_muscle   = gr.HTML()
+                with gr.Row():
+                    chart_water    = gr.HTML()
+                    chart_bmr      = gr.HTML()
+                with gr.Row():
+                    chart_metage   = gr.HTML()
+                    chart_bone     = gr.HTML()
 
             with gr.Accordion("🔒 Privacidade e Dados (RGPD)", open=False):
                 gr.Markdown(
@@ -1107,6 +1630,8 @@ with gr.Blocks(title="Health Assistant") as demo:
 
     # Auto-refresh timer (picks up users/data created via Telegram)
     refresh_timer = gr.Timer(value=30)
+    # Hidden state used as a no-op trigger for the tick → then chain
+    _refresh_trigger = gr.State(value=0)
 
     # ── EVENT HANDLERS ───────────────────────────────────
 
@@ -1142,12 +1667,12 @@ with gr.Blocks(title="Health Assistant") as demo:
     load_profile_btn.click(
         load_profile,
         inputs=[global_uid],
-        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
-    ).then(load_weight_chart, inputs=[global_uid], outputs=[weight_chart])
+        outputs=[pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    ).then(load_weight_chart, inputs=[global_uid, weight_period], outputs=[weight_chart])
 
     save_profile_btn.click(
         save_profile,
-        inputs=[global_uid, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        inputs=[global_uid, pf_name, pf_birth_date, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
         outputs=[profile_status],
     )
 
@@ -1159,13 +1684,28 @@ with gr.Blocks(title="Health Assistant") as demo:
     gdpr_delete_btn.click(
         gdpr_delete_fn,
         inputs=[global_uid],
-        outputs=[gdpr_status, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal, weight_chart],
+        outputs=[gdpr_status, pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal, weight_chart],
     )
 
     add_weight_btn.click(
         add_weight_entry,
-        inputs=[global_uid, new_weight],
-        outputs=[weight_status, weight_chart, new_weight, pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        inputs=[global_uid, new_weight, weight_period],
+        outputs=[weight_status, weight_chart, new_weight, pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    )
+
+    weight_period.change(
+        load_weight_chart,
+        inputs=[global_uid, weight_period],
+        outputs=[weight_chart],
+    )
+
+    _comp_outputs = [chart_bmi, chart_fat, chart_visceral, chart_muscle,
+                     chart_water, chart_bmr, chart_metage, chart_bone]
+
+    comp_period.change(
+        load_all_comp_charts,
+        inputs=[global_uid, comp_period],
+        outputs=_comp_outputs,
     )
 
     # 3. Preferências — load
@@ -1317,15 +1857,19 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[user_select],
         outputs=[global_uid],
     ).then(
-        check_user_status, inputs=[global_uid], outputs=[user_status],
+        # Read user_select directly here — global_uid may still be propagating
+        # when this fires concurrently with the timer chain auto-selection.
+        check_user_status, inputs=[user_select], outputs=[user_status],
     ).then(
         load_profile,
-        inputs=[global_uid],
-        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        inputs=[user_select],
+        outputs=[pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
     ).then(
-        load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
+        load_weight_chart, inputs=[user_select, weight_period], outputs=[weight_chart],
     ).then(
-        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+        load_all_comp_charts, inputs=[user_select, comp_period], outputs=_comp_outputs,
+    ).then(
+        load_all_prefs, inputs=[user_select], outputs=_PREF_CHECKS,
     )
 
     create_user_btn.click(
@@ -1335,38 +1879,71 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         load_profile,
         inputs=[global_uid],
-        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        outputs=[pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
     ).then(
         load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
     )
 
-    # Auto-load first user on page startup
-    if _initial_uid:
-        demo.load(
-            fn=lambda: _initial_uid,
-            outputs=[global_uid],
-        ).then(
-            load_profile,
-            inputs=[global_uid],
-            outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
-        ).then(
-            load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
-        ).then(
-            load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
-        )
+    # Periodic refresh — syncs the user list.
+    # gr.Timer.tick() does not support gr.State inputs, so tick() only bumps a
+    # hidden counter to trigger the chain; all dropdown updates happen in the
+    # subsequent .then() which CAN read gr.State.
+    def _bump_trigger(n):
+        return n + 1
 
-    # Periodic refresh — syncs data created externally (e.g. via Telegram)
+    def _sync_user_dropdown(current_uid):
+        """Refresh choices and auto-select the first user when none is selected.
+
+        Always updates choices and value together so Gradio never validates a
+        stale value against new choices (avoids UserWarning).
+        Returns no-op updates if the DB is temporarily unavailable (e.g. during
+        a long Tanita sync write) so the current user is never lost.
+        """
+        users = list_users()
+        if not users and current_uid:
+            # DB temporarily unavailable or empty; preserve current state entirely.
+            return gr.update(), current_uid
+        if current_uid:
+            return gr.update(choices=users), current_uid
+        if users:
+            first_uid = users[0][1]
+            return gr.update(choices=users, value=first_uid), first_uid
+        return gr.update(choices=users, value=None), ""
+
+    # On every page load (including new tabs opened after app startup):
+    # sync the dropdown so users created via Telegram are immediately visible.
+    demo.load(
+        _sync_user_dropdown,
+        inputs=[global_uid],
+        outputs=[user_select, global_uid],
+    ).then(
+        load_profile,
+        inputs=[global_uid],
+        outputs=[pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+    ).then(
+        load_weight_chart, inputs=[global_uid, weight_period], outputs=[weight_chart],
+    ).then(
+        load_all_comp_charts, inputs=[global_uid, comp_period], outputs=_comp_outputs,
+    ).then(
+        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    )
+
     refresh_timer.tick(
-        fn=lambda: gr.update(choices=list_users()),
-        outputs=[user_select],
+        fn=_bump_trigger,
+        inputs=[_refresh_trigger],
+        outputs=[_refresh_trigger],
+    ).then(
+        _sync_user_dropdown,
+        inputs=[global_uid],
+        outputs=[user_select, global_uid],
     ).then(
         check_user_status, inputs=[global_uid], outputs=[user_status],
     ).then(
         load_profile,
         inputs=[global_uid],
-        outputs=[pf_name, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
+        outputs=[pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal],
     ).then(
-        load_weight_chart, inputs=[global_uid], outputs=[weight_chart],
+        load_weight_chart, inputs=[global_uid, weight_period], outputs=[weight_chart],
     ).then(
-        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+        load_all_comp_charts, inputs=[global_uid, comp_period], outputs=_comp_outputs,
     )

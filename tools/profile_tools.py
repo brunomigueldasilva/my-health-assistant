@@ -15,15 +15,32 @@ from xai import xai_tool
 logger = logging.getLogger(__name__)
 
 
+def _age_from_birth_date(birth_date: Optional[str]) -> Optional[int]:
+    """Compute current age in years from an ISO date string (YYYY-MM-DD)."""
+    if not birth_date:
+        return None
+    try:
+        from datetime import date
+        bd = datetime.strptime(birth_date[:10], "%Y-%m-%d").date()
+        today = date.today()
+        return today.year - bd.year - ((today.month, today.day) < (bd.month, bd.day))
+    except Exception:
+        return None
+
+
 def _get_db():
     """Return SQLite connection, ensuring tables exist."""
     conn = sqlite3.connect(str(SQLITE_DB))
     conn.row_factory = sqlite3.Row
+    # WAL mode allows concurrent reads during writes (prevents Gradio UI lockout
+    # while long Tanita syncs are running).
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.execute(
         """CREATE TABLE IF NOT EXISTS user_profiles (
             user_id TEXT PRIMARY KEY,
             name TEXT,
-            age INTEGER,
+            birth_date TEXT,
             gender TEXT,
             height_cm REAL,
             weight_kg REAL,
@@ -39,6 +56,29 @@ def _get_db():
             user_id TEXT,
             weight_kg REAL,
             recorded_at TEXT
+        )"""
+    )
+    conn.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_weight_history_unique
+           ON weight_history (user_id, recorded_at)"""
+    )
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS body_composition_history (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id         TEXT    NOT NULL,
+            measured_at     TEXT    NOT NULL,
+            weight_kg       REAL,
+            bmi             REAL,
+            body_fat_pct    REAL,
+            visceral_fat    REAL,
+            muscle_mass_kg  REAL,
+            muscle_quality  REAL,
+            bone_mass_kg    REAL,
+            bmr_kcal        REAL,
+            metabolic_age   INTEGER,
+            body_water_pct  REAL,
+            physique_rating INTEGER,
+            UNIQUE(user_id, measured_at)
         )"""
     )
     conn.commit()
@@ -74,9 +114,12 @@ def get_user_profile(user_id: str | int) -> str:
             f"💡 Usa /perfil para configurar."
         )
 
+    age = _age_from_birth_date(row["birth_date"])
+    bd = row["birth_date"] or ""
+    age_label = f"{age} anos (nasc. {bd})" if age and bd else (f"{age} anos" if age else "?")
     return (
         f"👤 Perfil de {row['name'] or 'Utilizador'}:\n"
-        f"  • Idade: {row['age'] or '?'} anos\n"
+        f"  • Idade: {age_label}\n"
         f"  • Género: {row['gender'] or '?'}\n"
         f"  • Altura: {row['height_cm'] or '?'} cm\n"
         f"  • Peso: {row['weight_kg'] or '?'} kg\n"
@@ -90,7 +133,7 @@ def get_user_profile(user_id: str | int) -> str:
 def update_user_profile(
     user_id: str | int,
     name: Optional[str] = None,
-    age: Optional[int] = None,
+    birth_date: Optional[str] = None,
     gender: Optional[str] = None,
     height_cm: Optional[float] = None,
     weight_kg: Optional[float] = None,
@@ -99,11 +142,12 @@ def update_user_profile(
 ) -> str:
     """
     Update user profile. Only provided fields are updated.
+    Age is never stored — it is always computed from birth_date at runtime.
 
     Args:
-        user_id: Telegram user ID (string or integer)
+        user_id: App user ID (string or integer)
         name: User's name
-        age: Age in years
+        birth_date: Date of birth in ISO format YYYY-MM-DD
         gender: "male" or "female"
         height_cm: Height in centimeters
         weight_kg: Weight in kilograms
@@ -124,13 +168,12 @@ def update_user_profile(
     if not existing:
         conn.execute(
             """INSERT INTO user_profiles
-               (user_id, name, age, gender, height_cm, weight_kg,
+               (user_id, name, birth_date, gender, height_cm, weight_kg,
                 activity_level, goal, created_at, updated_at)
                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (user_id, name, age, gender, height_cm, weight_kg,
+            (user_id, name, birth_date, gender, height_cm, weight_kg,
              activity_level, goal, now, now),
         )
-        # Seed default preferences for the new user
         try:
             from knowledge.seed_data import seed_user_preferences
             seed_user_preferences(user_id)
@@ -139,8 +182,8 @@ def update_user_profile(
     else:
         updates, params = [], []
         for field, value in [
-            ("name", name), ("age", age), ("gender", gender),
-            ("height_cm", height_cm), ("weight_kg", weight_kg),
+            ("name", name), ("birth_date", birth_date),
+            ("gender", gender), ("height_cm", height_cm), ("weight_kg", weight_kg),
             ("activity_level", activity_level), ("goal", goal),
         ]:
             if value is not None:
@@ -156,7 +199,7 @@ def update_user_profile(
 
     if weight_kg is not None:
         conn.execute(
-            "INSERT INTO weight_history (user_id, weight_kg, recorded_at) VALUES (?, ?, ?)",
+            "INSERT OR IGNORE INTO weight_history (user_id, weight_kg, recorded_at) VALUES (?, ?, ?)",
             (user_id, weight_kg, now),
         )
 
@@ -165,7 +208,7 @@ def update_user_profile(
 
     updated = [
         label for label, v in [
-            ("nome", name), ("idade", age), ("género", gender),
+            ("nome", name), ("data nasc.", birth_date), ("género", gender),
             ("altura", height_cm), ("peso", weight_kg),
             ("atividade", activity_level), ("objetivo", goal),
         ] if v is not None
@@ -173,6 +216,7 @@ def update_user_profile(
     return f"✅ Perfil atualizado: {', '.join(updated)}"
 
 
+@xai_tool
 def add_allergy(user_id: str | int, allergy: str) -> str:
     """
     Add an allergy or food intolerance for the user.
@@ -347,6 +391,7 @@ def delete_all_user_data(user_id: str | int) -> str:
     conn = _get_db()
     conn.execute("DELETE FROM user_profiles WHERE user_id = ?", (user_id,))
     conn.execute("DELETE FROM weight_history WHERE user_id = ?", (user_id,))
+    conn.execute("DELETE FROM body_composition_history WHERE user_id = ?", (user_id,))
     conn.commit()
     conn.close()
 
@@ -377,6 +422,7 @@ def delete_all_user_data(user_id: str | int) -> str:
 PROFILE_TOOLS = [
     get_user_profile,
     update_user_profile,
+    add_allergy,
     add_food_preference,
     add_health_goal,
     get_weight_history,

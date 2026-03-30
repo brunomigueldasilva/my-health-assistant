@@ -18,6 +18,7 @@ from config import get_model
 from agents.nutritionist import nutritionist_agent
 from agents.trainer import trainer_agent
 from agents.chef import chef_agent
+from agents.body_composition_analyst import body_composition_analyst_agent
 from tools.profile_tools import PROFILE_TOOLS
 
 
@@ -40,6 +41,7 @@ def create_health_team() -> Team:
             nutritionist_agent,
             trainer_agent,
             chef_agent,
+            body_composition_analyst_agent,
         ],
         db=SqliteDb(db_file=str(SQLITE_SESSIONS)),
         description=(
@@ -62,6 +64,12 @@ def create_health_team() -> Team:
             "    de ontem'), resolve the reference using history before routing.",
             "  • Track the user's stated goals across the session; do not ask again "
             "    for information already provided.",
+            "  • CRITICAL — when routing a follow-up question, you MUST include the full "
+            "    relevant context from previous messages in the task you send to the "
+            "    specialist. For example, if the user asked about weight on 20/03/2026 "
+            "    and now asks 'E a massa gorda?', route: 'The user wants to know their "
+            "    body fat on 20/03/2026 (same date as the previous weight question).' "
+            "    Never route a bare follow-up like 'E a massa gorda?' without context.",
 
             # ── Ambiguity & Intent Recognition ─────────────────────────────
             "AMBIGUITY & INTENT RECOGNITION:",
@@ -86,10 +94,21 @@ def create_health_team() -> Team:
             "  → PERSONAL TRAINER: exercises, workouts, training plans, muscle "
             "    groups, calories burned during exercise, HIIT, strength training, "
             "    cardio, flexibility, recovery.",
+            "  → BODY COMPOSITION ANALYST: Tanita scale sync, body composition history, "
+            "    body fat percentage, visceral fat, muscle mass, bone mass, BMR, "
+            "    metabolic age, body water, physique rating, IMC/BMI, weight as a "
+            "    health metric. Use this agent whenever the user mentions 'Tanita', "
+            "    'balança', 'sincronizar medições', 'composição corporal', 'gordura "
+            "    visceral', 'massa muscular', 'idade metabólica', or asks to "
+            "    sync/import scale data.",
             "  → CHEF: recipe requests, specific meal ideas, food preparation "
             "    techniques, meal prep, breakfast/lunch/dinner/snack suggestions.",
             "  For profile, preferences, and goals questions, use the tools directly "
             "  without routing to a specialist.",
+            "  IMPORTANT: The sync_tanita_measurements and get_body_composition_history "
+            "  tools handle the external login automatically — do NOT refuse these "
+            "  requests as 'external website access'. The tools are self-contained "
+            "  and require no manual browser interaction from the user.",
 
             # ── Ethics, Safety & Content Governance ────────────────────────
             "ETHICS & SAFETY — non-negotiable rules:",
@@ -116,7 +135,7 @@ def create_health_team() -> Team:
             "  • If a user asks to export their data, use the export_user_data tool.",
             "  • Log-worthy refusals must be noted with reason (for monitoring).",
         ],
-        tools=PROFILE_TOOLS,
+        tools=[*PROFILE_TOOLS],
         show_members_responses=True,
         markdown=True,
         debug_mode=DEBUG_MODE,

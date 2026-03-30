@@ -7,6 +7,7 @@ in context.user_data (no ConversationHandler dependency).
 
 import asyncio
 import logging
+import re
 import sqlite3
 import uuid
 from datetime import datetime
@@ -49,32 +50,39 @@ _ONB_DATA = "onb_data"
 
 _STEP_WELCOME     = "welcome"
 _STEP_GENDER      = "gender"
-_STEP_AGE         = "age"
+_STEP_BIRTH_DATE  = "birth_date"
 _STEP_HEIGHT      = "height"
 _STEP_WEIGHT      = "weight"
 _STEP_ACTIVITY    = "activity"
-_STEP_GOAL        = "goal"
-_STEP_GOAL_WEIGHT = "goal_weight"
-_STEP_ALLERGIES   = "allergies"
+_STEP_GOAL              = "goal"
+_STEP_GOAL_WEIGHT       = "goal_weight"
+_STEP_GOAL_MUSCLE       = "goal_muscle"
+_STEP_GOAL_BODY_FAT     = "goal_body_fat"
+_STEP_GOAL_VISCERAL_FAT = "goal_visceral_fat"
+_STEP_ALLERGIES         = "allergies"
 
 _ACTIVITY_OPTIONS = [
     ("sedentary",   "🛋️ Sedentário"),
-    ("light",       "🚶 Ligeiro"),
-    ("moderate",    "🏃 Moderado"),
-    ("active",      "💪 Activo"),
-    ("very_active", "🔥 Muito Activo"),
+    ("light",       "🚶 Ligeiro (1-2x/semana)"),
+    ("moderate",    "🏃 Moderado (3-5x/semana)"),
+    ("active",      "💪 Activo (6-7x/semana)"),
+    ("very_active", "🔥 Muito Activo (2x/dia)"),
 ]
 _ACTIVITY_LABEL = {k: v for k, v in _ACTIVITY_OPTIONS}
 
 _GOAL_OPTIONS = [
-    ("lose_visceral",   "🔥 Perder gordura visceral"),
-    ("lose_weight",     "⬇️ Perder peso"),
-    ("target_weight",   "🎯 Atingir peso específico"),
-    ("gain_muscle",     "💪 Ganhar massa muscular"),
-    ("maintain",        "⚖️ Manter peso actual"),
-    ("improve_fitness", "🏃 Melhorar condição física"),
-    ("improve_health",  "❤️ Melhorar saúde geral"),
-    ("better_diet",     "🍽️ Melhores hábitos alimentares"),
+    ("lose_weight",          "⬇️ Perder peso"),
+    ("gain_muscle",          "💪 Ganhar massa muscular"),
+    ("lose_fat",             "🔥 Perder massa gorda"),
+    ("lose_visceral",        "🫀 Perder gordura visceral"),
+    ("maintain",             "⚖️ Manter peso actual"),
+    ("improve_fitness",      "🏃 Melhorar condição física"),
+    ("improve_health",       "❤️ Melhorar saúde em geral"),
+    ("better_diet",          "🍽️ Melhores hábitos alimentares"),
+    ("target_weight",        "🎯 Atingir peso específico (ex: 75 kg)"),
+    ("target_muscle",        "💪 Atingir massa muscular específica (ex: 65 kg ou 60%)"),
+    ("target_body_fat",      "📊 Atingir gordura corporal específica (ex: 15%)"),
+    ("target_visceral_fat",  "🔬 Atingir gordura visceral específica (ex: 6 kg)"),
 ]
 _GOAL_LABEL = {k: v for k, v in _GOAL_OPTIONS}
 
@@ -139,8 +147,9 @@ def _uname(update: Update) -> str:
 def _is_profile_complete(uid: str) -> bool:
     try:
         conn = sqlite3.connect(str(SQLITE_DB))
+        conn.execute("PRAGMA busy_timeout=5000")
         row = conn.execute(
-            "SELECT age, gender, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
+            "SELECT birth_date, gender, weight_kg FROM user_profiles WHERE user_id = ?", (uid,)
         ).fetchone()
         conn.close()
         return bool(row and row[0] and row[1] and row[2])
@@ -168,10 +177,15 @@ def _onb_clear(context: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════
 
 def _gender_keyboard() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("👨 Masculino", callback_data="ob_gender:M"),
-        InlineKeyboardButton("👩 Feminino",  callback_data="ob_gender:F"),
-    ]])
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👨 Masculino", callback_data="ob_gender:M"),
+            InlineKeyboardButton("👩 Feminino",  callback_data="ob_gender:F"),
+        ],
+        [
+            InlineKeyboardButton("🧑 Outro / Prefiro não dizer", callback_data="ob_gender:O"),
+        ],
+    ])
 
 
 def _skip_keyboard(cb: str) -> InlineKeyboardMarkup:
@@ -188,12 +202,10 @@ def _activity_keyboard() -> InlineKeyboardMarkup:
 
 
 def _goal_keyboard() -> InlineKeyboardMarkup:
-    rows = []
-    for i in range(0, len(_GOAL_OPTIONS), 2):
-        rows.append([
-            InlineKeyboardButton(label, callback_data=f"ob_goal:{key}")
-            for key, label in _GOAL_OPTIONS[i:i + 2]
-        ])
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"ob_goal:{key}")]
+        for key, label in _GOAL_OPTIONS
+    ]
     return InlineKeyboardMarkup(rows)
 
 
@@ -341,7 +353,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"Olá *{name}*! 👋\n\n"
         f"Sou o teu assistente pessoal de saúde, com uma equipa de especialistas:\n"
-        f"🥗 *Nutricionista* · 🏋️ *Personal Trainer* · 👨‍🍳 *Chef*\n\n"
+        f"🥗 *Nutricionista*\n"
+        f"🏋️ *Personal Trainer*\n"
+        f"👨‍🍳 *Chef*\n"
+        f"📊 *Analista de Composição Corporal*\n\n"
         f"Para receber conselhos personalizados, preciso de conhecer-te melhor.\n"
         f"São apenas *4 passos rápidos* — menos de 1 minuto! ⚡",
         reply_markup=keyboard,
@@ -394,18 +409,19 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
 
     # ── ob_gender:* ───────────────────────────────────
     if data.startswith("ob_gender:") and step == _STEP_GENDER:
-        _onb_data(context)["gender"] = "male" if data.endswith(":M") else "female"
-        context.user_data[_ONB_STEP] = _STEP_AGE
+        gender_map = {":M": "male", ":F": "female", ":O": "other"}
+        _onb_data(context)["gender"] = gender_map.get(data[-2:], "other")
+        context.user_data[_ONB_STEP] = _STEP_BIRTH_DATE
         await query.edit_message_text(
             "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
-            "Qual é a tua idade? _(em anos, ex: 35)_",
-            reply_markup=_skip_keyboard("ob_age_skip"),
+            "Qual é a tua data de nascimento? _(formato DD/MM/AAAA, ex: 15/03/1985)_",
+            reply_markup=_skip_keyboard("ob_birth_date_skip"),
             parse_mode="Markdown",
         )
         return
 
-    # ── ob_age_skip ───────────────────────────────────
-    if data == "ob_age_skip":
+    # ── ob_birth_date_skip ────────────────────────────
+    if data == "ob_birth_date_skip":
         context.user_data[_ONB_STEP] = _STEP_HEIGHT
         await query.edit_message_text(
             "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
@@ -461,6 +477,33 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
                 parse_mode="Markdown",
             )
             return
+        if goal_key == "target_muscle":
+            context.user_data[_ONB_STEP] = _STEP_GOAL_MUSCLE
+            await query.edit_message_text(
+                "*Passo 3 de 4 — Objectivo* 🎯\n\n"
+                "Qual é a tua percentagem de massa muscular alvo? _(em %, ex: 40)_",
+                reply_markup=_skip_keyboard("ob_goal_muscle_skip"),
+                parse_mode="Markdown",
+            )
+            return
+        if goal_key == "target_body_fat":
+            context.user_data[_ONB_STEP] = _STEP_GOAL_BODY_FAT
+            await query.edit_message_text(
+                "*Passo 3 de 4 — Objectivo* 🎯\n\n"
+                "Qual é a tua percentagem de gordura corporal alvo? _(em %, ex: 15)_",
+                reply_markup=_skip_keyboard("ob_goal_body_fat_skip"),
+                parse_mode="Markdown",
+            )
+            return
+        if goal_key == "target_visceral_fat":
+            context.user_data[_ONB_STEP] = _STEP_GOAL_VISCERAL_FAT
+            await query.edit_message_text(
+                "*Passo 3 de 4 — Objectivo* 🎯\n\n"
+                "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+                reply_markup=_skip_keyboard("ob_goal_visceral_fat_skip"),
+                parse_mode="Markdown",
+            )
+            return
         _onb_data(context)["goal"] = _GOAL_LABEL.get(goal_key, goal_key)
         context.user_data[_ONB_STEP] = _STEP_ALLERGIES
         _onb_data(context).setdefault("allergies", set())
@@ -473,9 +516,15 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
         )
         return
 
-    # ── ob_goal_weight_skip ───────────────────────────
-    if data == "ob_goal_weight_skip":
-        _onb_data(context)["goal"] = "Atingir peso específico"
+    # ── ob_goal_*_skip ────────────────────────────────
+    _GOAL_SKIP_LABELS = {
+        "ob_goal_weight_skip":      "Atingir peso específico",
+        "ob_goal_muscle_skip":      "Atingir massa muscular específica",
+        "ob_goal_body_fat_skip":    "Atingir gordura corporal específica",
+        "ob_goal_visceral_fat_skip":"Atingir gordura visceral específica",
+    }
+    if data in _GOAL_SKIP_LABELS:
+        _onb_data(context)["goal"] = _GOAL_SKIP_LABELS[data]
         context.user_data[_ONB_STEP] = _STEP_ALLERGIES
         _onb_data(context).setdefault("allergies", set())
         await query.edit_message_text(
@@ -519,7 +568,7 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
     try:
         update_user_profile(
             uid,
-            age=d.get("age"),
+            birth_date=d.get("birth_date"),
             gender=d.get("gender"),
             height_cm=d.get("height_cm"),
             weight_kg=d.get("weight_kg"),
@@ -542,17 +591,18 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
         except Exception as exc:
             logger.warning("finish_onboarding: goal save failed: %s", exc)
 
-    gender_icon  = "👨" if d.get("gender") == "male" else "👩"
-    gender_label = "Masculino" if d.get("gender") == "male" else "Feminino"
+    _gender_display = {"male": ("👨", "Masculino"), "female": ("👩", "Feminino"), "other": ("🧑", "Outro")}
+    gender_icon, gender_label = _gender_display.get(d.get("gender", ""), ("🧑", "Outro"))
     height_str   = f"{d['height_cm']:.0f} cm" if d.get("height_cm") else "—"
     weight_str   = f"{d['weight_kg']:.1f} kg"  if d.get("weight_kg") else "—"
     allergy_str  = ", ".join(sorted(allergies)) if allergies else "Nenhuma"
     activity_label = _ACTIVITY_LABEL.get(d.get("activity_level", ""), "—")
 
+    birth_date_display = d.get("birth_date") or "—"
     summary = (
         f"✅ *Perfil criado com sucesso!*\n\n"
         f"{gender_icon} Género: {gender_label}\n"
-        f"🎂 Idade: {d.get('age', '—')}\n"
+        f"🎂 Data de nascimento: {birth_date_display}\n"
         f"📏 Altura: {height_str}\n"
         f"⚖️ Peso: {weight_str}\n"
         f"🏃 Actividade: {activity_label}\n"
@@ -566,27 +616,31 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
 
 
 # ══════════════════════════════════════════════════════
-# ONBOARDING — TEXT INPUT HANDLER (age / height / weight / goal_weight)
+# ONBOARDING — TEXT INPUT HANDLER (birth_date / height / weight / goal_weight)
 # ══════════════════════════════════════════════════════
 
 async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
-    """Consume height/weight/age text during onboarding. Returns True if consumed."""
+    """Consume birth_date/height/weight text during onboarding. Returns True if consumed."""
     step = _onb_step(context)
 
-    if step == _STEP_AGE:
+    if step == _STEP_BIRTH_DATE:
         text = update.message.text.strip()
-        try:
-            age = int(float(text.replace(",", ".")))
-            if not (10 <= age <= 120):
-                raise ValueError
-        except ValueError:
+        birth_date_iso = None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                from datetime import datetime as _dt
+                birth_date_iso = _dt.strptime(text, fmt).strftime("%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        if not birth_date_iso:
             await update.message.reply_text(
-                "❌ Idade inválida. Insere um número entre 10 e 120 _(ex: 35)_.\n"
+                "❌ Data inválida. Insere no formato DD/MM/AAAA _(ex: 15/03/1985)_.\n"
                 "Ou usa o botão *Saltar* na mensagem acima.",
                 parse_mode="Markdown",
             )
             return True
-        _onb_data(context)["age"] = age
+        _onb_data(context)["birth_date"] = birth_date_iso
         context.user_data[_ONB_STEP] = _STEP_HEIGHT
         await update.message.reply_text(
             "*Passo 1 de 4 — Dados pessoais* 👤\n\n"
@@ -656,6 +710,81 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
             )
             return True
         _onb_data(context)["goal"] = f"Atingir {target:.1f} kg"
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await update.message.reply_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == _STEP_GOAL_MUSCLE:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            target = float(text)
+            if not (1 <= target <= 80):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere uma percentagem entre 1 e 80 _(ex: 40)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+        _onb_data(context)["goal"] = f"Atingir {target:.1f}% de massa muscular"
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await update.message.reply_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == _STEP_GOAL_BODY_FAT:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            target = float(text)
+            if not (1 <= target <= 60):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere uma percentagem entre 1 e 60 _(ex: 15)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+        _onb_data(context)["goal"] = f"Atingir {target:.1f}% de gordura corporal"
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await update.message.reply_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == _STEP_GOAL_VISCERAL_FAT:
+        text = update.message.text.strip().replace(",", ".")
+        try:
+            target = float(text)
+            if not (1 <= target <= 30):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere um nível entre 1 e 30 _(ex: 6)_.\n"
+                "Ou usa o botão *Saltar* na mensagem acima.",
+                parse_mode="Markdown",
+            )
+            return True
+        _onb_data(context)["goal"] = f"Atingir nível {target:.1f} de gordura visceral"
         context.user_data[_ONB_STEP] = _STEP_ALLERGIES
         _onb_data(context).setdefault("allergies", set())
         await update.message.reply_text(
@@ -876,7 +1005,15 @@ def _infer_specialist_from_tracker(tracker) -> str:
     return "(sem ferramentas)"
 
 
+_METADATA_PREFIX_RE = re.compile(
+    r"\[Data de hoje:[^\]]*\]\s*\[ID do utilizador:[^\]]*\]\s*\n?",
+    re.IGNORECASE,
+)
+
+
 def _sanitize_response(text: str) -> str:
+    # Strip any metadata prefix the model leaked into its reply.
+    text = _METADATA_PREFIX_RE.sub("", text).lstrip()
     low = text.lower()
     if any(k in low for k in ("429", "resource_exhausted", "quota", "rate limit", "too many requests")):
         return "⏳ O serviço de IA atingiu o limite de pedidos. Aguarda uns segundos e tenta novamente."
@@ -919,7 +1056,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     tracker.reset(msg)
     logger.info("[%s] %s: %s", uid, name, msg[:80])
 
-    enriched = f"[User: {name}, ID: {uid}]\n{msg}"
+    today = datetime.now().strftime("%d/%m/%Y")
+    enriched = f"[Data de hoje: {today}] [ID do utilizador: {uid}]\n{msg}"
 
     try:
         team = get_team()
