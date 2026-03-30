@@ -748,14 +748,15 @@ def gdpr_export_fn(user_id: str):
 def gdpr_delete_fn(user_id: str):
     uid = user_id.strip()
     empty_profile = ("", "", "", None, None, None, None, "")
+    empty_charts = (None,) * 9  # weight_chart + 8 body composition charts
     if not uid:
-        return ("❌ Introduz um User ID.", *empty_profile, None)
+        return ("❌ Introduz um User ID.", *empty_profile, *empty_charts)
     try:
         from tools.profile_tools import delete_all_user_data
         msg = delete_all_user_data(uid)
-        return (msg, *empty_profile, None)
+        return (msg, *empty_profile, *empty_charts)
     except Exception as e:
-        return (f"❌ Erro: {e}", *empty_profile, None)
+        return (f"❌ Erro: {e}", *empty_profile, *empty_charts)
 
 
 def add_weight_entry(user_id: str, weight_str: str, period: str = "Último Ano"):
@@ -1684,7 +1685,8 @@ with gr.Blocks(title="Health Assistant") as demo:
     gdpr_delete_btn.click(
         gdpr_delete_fn,
         inputs=[global_uid],
-        outputs=[gdpr_status, pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal, weight_chart],
+        outputs=[gdpr_status, pf_name, pf_birth_date, pf_age, pf_gender, pf_height, pf_weight, pf_activity, pf_goal,
+                 weight_chart, chart_bmi, chart_fat, chart_visceral, chart_muscle, chart_water, chart_bmr, chart_metage, chart_bone],
     )
 
     add_weight_btn.click(

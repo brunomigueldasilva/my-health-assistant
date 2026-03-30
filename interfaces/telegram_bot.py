@@ -83,6 +83,7 @@ _GOAL_OPTIONS = [
     ("target_muscle",        "💪 Atingir massa muscular específica (ex: 65 kg ou 60%)"),
     ("target_body_fat",      "📊 Atingir gordura corporal específica (ex: 15%)"),
     ("target_visceral_fat",  "🔬 Atingir gordura visceral específica (ex: 6 kg)"),
+    ("define_abs",           "💎 Definir os abdominais"),
 ]
 _GOAL_LABEL = {k: v for k, v in _GOAL_OPTIONS}
 
@@ -109,6 +110,7 @@ _PREF_EXAMPLES = {
 _PREFS_STATE = "prefs_state"
 _PREFS_ITEMS = "prefs_items"
 _PREFS_SEL   = "prefs_selected"
+_EDIT_STEP = "edit_step"
 
 
 # ══════════════════════════════════════════════════════
@@ -288,6 +290,51 @@ def _format_pref_items(items: list, cat_label: str, cat: str = "") -> str:
 # PREFERENCES — KEYBOARD BUILDERS
 # ══════════════════════════════════════════════════════
 
+def _edit_main_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("📝 Nome",                callback_data="edit_field:name")],
+        [InlineKeyboardButton("🎂 Data de nascimento",  callback_data="edit_field:birth_date")],
+        [InlineKeyboardButton("👤 Género",              callback_data="edit_field:gender")],
+        [InlineKeyboardButton("📏 Altura",              callback_data="edit_field:height")],
+        [InlineKeyboardButton("⚖️ Peso",                callback_data="edit_field:weight")],
+        [InlineKeyboardButton("🏃 Nível de actividade", callback_data="edit_field:activity")],
+        [InlineKeyboardButton("🎯 Objectivo",           callback_data="edit_field:goal")],
+    ])
+
+
+def _edit_gender_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("👨 Masculino", callback_data="edit_gender:M"),
+            InlineKeyboardButton("👩 Feminino",  callback_data="edit_gender:F"),
+        ],
+        [InlineKeyboardButton("🧑 Outro / Prefiro não dizer", callback_data="edit_gender:O")],
+        [InlineKeyboardButton("◀️ Voltar", callback_data="edit_back")],
+    ])
+
+
+def _edit_activity_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"edit_activity:{key}")]
+        for key, label in _ACTIVITY_OPTIONS
+    ]
+    rows.append([InlineKeyboardButton("◀️ Voltar", callback_data="edit_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _edit_goal_keyboard() -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(label, callback_data=f"edit_goal:{key}")]
+        for key, label in _GOAL_OPTIONS
+    ]
+    rows.append([InlineKeyboardButton("◀️ Voltar", callback_data="edit_back")])
+    return InlineKeyboardMarkup(rows)
+
+
+def _edit_cancel_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([[InlineKeyboardButton("❌ Cancelar", callback_data="edit_back")]])
+
+
 def _prefs_main_keyboard() -> InlineKeyboardMarkup:
     rows = [
         [InlineKeyboardButton(label, callback_data=f"prefs_cat:{cat}")]
@@ -338,7 +385,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A tua equipa de saúde está pronta:\n"
             f"🥗 *Nutricionista* · 🏋️ *Trainer* · 👨‍🍳 *Chef*\n\n"
             f"Basta enviares uma mensagem ou usar:\n"
-            f"/help · /perfil · /peso · /preferencias · /reset",
+            f"/help · /perfil · /editar · /peso · /preferencias · /reset",
             parse_mode="Markdown",
         )
         return
@@ -369,6 +416,7 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Comandos disponíveis:\n\n"
         "/start - Iniciar o bot e configurar perfil\n"
         "/perfil - Ver o teu perfil\n"
+        "/editar - Corrigir dados do perfil (nome, data de nascimento, etc.)\n"
         "/preferencias - Gerir preferências (gostos, alergias, etc.)\n"
         "/peso - Registar peso actual\n"
         "/historico - Ver histórico de pesos\n"
@@ -955,6 +1003,371 @@ async def _handle_prefs_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 # ══════════════════════════════════════════════════════
+# EDIT PROFILE — /editar
+# ══════════════════════════════════════════════════════
+
+async def cmd_editar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.pop(_EDIT_STEP, None)
+    await update.message.reply_text(
+        "✏️ *Editar perfil*\n\nQual campo queres actualizar?",
+        reply_markup=_edit_main_keyboard(),
+        parse_mode="Markdown",
+    )
+
+
+async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Single handler for all edit_* callback queries."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    uid  = _uid(update)
+
+    _BACK_TEXT = "✏️ *Editar perfil*\n\nQual campo queres actualizar?"
+
+    # ── edit_back → main menu ─────────────────────────
+    if data == "edit_back":
+        context.user_data.pop(_EDIT_STEP, None)
+        await query.edit_message_text(
+            _BACK_TEXT,
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── edit_field:{field} → prompt for value ─────────
+    if data.startswith("edit_field:"):
+        field = data.split(":", 1)[1]
+        if field == "gender":
+            context.user_data.pop(_EDIT_STEP, None)
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Género* 👤\n\nQual é o teu género?",
+                reply_markup=_edit_gender_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "activity":
+            context.user_data.pop(_EDIT_STEP, None)
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Nível de actividade* 🏃\n\n"
+                "Qual é o teu nível de actividade física habitual?",
+                reply_markup=_edit_activity_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "goal":
+            context.user_data.pop(_EDIT_STEP, None)
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
+                "Qual é o teu principal objectivo de saúde?",
+                reply_markup=_edit_goal_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "name":
+            context.user_data[_EDIT_STEP] = "name"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Nome* 📝\n\nEscreve o teu novo nome:",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "birth_date":
+            context.user_data[_EDIT_STEP] = "birth_date"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Data de nascimento* 🎂\n\n"
+                "Escreve a tua data de nascimento _(formato DD/MM/AAAA, ex: 15/03/1985)_:",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "height":
+            context.user_data[_EDIT_STEP] = "height"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Altura* 📏\n\nEscreve a tua altura _(em cm, ex: 175)_:",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+        elif field == "weight":
+            context.user_data[_EDIT_STEP] = "weight"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Peso* ⚖️\n\nEscreve o teu peso actual _(em kg, ex: 78.5)_:",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+        return
+
+    # ── edit_gender:* ─────────────────────────────────
+    if data.startswith("edit_gender:"):
+        gender_map = {":M": "male", ":F": "female", ":O": "other"}
+        gender_label = {"male": "Masculino", "female": "Feminino", "other": "Outro"}
+        gender = gender_map.get(data[-2:], "other")
+        try:
+            update_user_profile(uid, gender=gender)
+        except Exception as exc:
+            logger.error("edit_gender: save failed for %s: %s", uid, exc)
+            await query.edit_message_text("❌ Erro ao guardar. Tenta novamente.")
+            return
+        await query.edit_message_text(
+            f"✅ *Género actualizado:* {gender_label.get(gender, gender)}\n\n" + _BACK_TEXT,
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── edit_activity:* ───────────────────────────────
+    if data.startswith("edit_activity:"):
+        level = data.split(":", 1)[1]
+        label = _ACTIVITY_LABEL.get(level, level)
+        try:
+            update_user_profile(uid, activity_level=level)
+        except Exception as exc:
+            logger.error("edit_activity: save failed for %s: %s", uid, exc)
+            await query.edit_message_text("❌ Erro ao guardar. Tenta novamente.")
+            return
+        await query.edit_message_text(
+            f"✅ *Nível de actividade actualizado:* {label}\n\n" + _BACK_TEXT,
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── edit_goal:* ───────────────────────────────────
+    if data.startswith("edit_goal:"):
+        goal_key = data.split(":", 1)[1]
+        if goal_key == "target_weight":
+            context.user_data[_EDIT_STEP] = "goal_weight"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
+                "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+            return
+        if goal_key == "target_muscle":
+            context.user_data[_EDIT_STEP] = "goal_muscle"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
+                "Qual é a tua percentagem de massa muscular alvo? _(em %, ex: 40)_",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+            return
+        if goal_key == "target_body_fat":
+            context.user_data[_EDIT_STEP] = "goal_body_fat"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
+                "Qual é a tua percentagem de gordura corporal alvo? _(em %, ex: 15)_",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+            return
+        if goal_key == "target_visceral_fat":
+            context.user_data[_EDIT_STEP] = "goal_visceral_fat"
+            await query.edit_message_text(
+                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
+                "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+                reply_markup=_edit_cancel_keyboard(),
+                parse_mode="Markdown",
+            )
+            return
+        goal_text = _GOAL_LABEL.get(goal_key, goal_key)
+        try:
+            update_user_profile(uid, goal=goal_text)
+            add_health_goal(uid, goal_text)
+        except Exception as exc:
+            logger.error("edit_goal: save failed for %s: %s", uid, exc)
+            await query.edit_message_text("❌ Erro ao guardar. Tenta novamente.")
+            return
+        await query.edit_message_text(
+            f"✅ *Objectivo actualizado:* {goal_text}\n\n" + _BACK_TEXT,
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return
+
+
+async def _handle_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Handle text input during edit flow. Returns True if consumed."""
+    step = context.user_data.get(_EDIT_STEP)
+    if not step:
+        return False
+
+    uid  = _uid(update)
+    text = update.message.text.strip()
+
+    async def _save_and_confirm(field_label: str, **kwargs):
+        try:
+            update_user_profile(uid, **kwargs)
+        except Exception as exc:
+            logger.error("_handle_edit_text: save failed for %s: %s", uid, exc)
+            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
+            return
+        context.user_data.pop(_EDIT_STEP, None)
+        await update.message.reply_text(
+            f"✅ *{field_label} actualizado(a).*\n\nQual campo queres actualizar a seguir?",
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+
+    if step == "name":
+        if not text:
+            await update.message.reply_text("❌ Nome inválido. Tenta novamente.")
+            return True
+        await _save_and_confirm("Nome", name=text)
+        return True
+
+    if step == "birth_date":
+        birth_date_iso = None
+        for fmt in ("%d/%m/%Y", "%Y-%m-%d"):
+            try:
+                birth_date_iso = datetime.strptime(text, fmt).strftime("%Y-%m-%d")
+                break
+            except ValueError:
+                continue
+        if not birth_date_iso:
+            await update.message.reply_text(
+                "❌ Data inválida. Insere no formato DD/MM/AAAA _(ex: 15/03/1985)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        await _save_and_confirm("Data de nascimento", birth_date=birth_date_iso)
+        return True
+
+    if step == "height":
+        try:
+            height = float(text.replace(",", "."))
+            if not (100 <= height <= 250):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Altura inválida. Insere um valor entre 100 e 250 cm _(ex: 175)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        await _save_and_confirm("Altura", height_cm=height)
+        return True
+
+    if step == "weight":
+        try:
+            weight = float(text.replace(",", "."))
+            if not (30 <= weight <= 300):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 78.5)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        await _save_and_confirm("Peso", weight_kg=weight)
+        return True
+
+    if step == "goal_weight":
+        try:
+            target = float(text.replace(",", "."))
+            if not (30 <= target <= 300):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 75)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        goal_text = f"Atingir {target:.1f} kg"
+        try:
+            update_user_profile(uid, goal=goal_text)
+            add_health_goal(uid, goal_text)
+        except Exception as exc:
+            logger.error("edit goal_weight: save failed: %s", exc)
+            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
+            return True
+        context.user_data.pop(_EDIT_STEP, None)
+        await update.message.reply_text(
+            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == "goal_muscle":
+        try:
+            target = float(text.replace(",", "."))
+            if not (1 <= target <= 80):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere uma percentagem entre 1 e 80 _(ex: 40)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        goal_text = f"Atingir {target:.1f}% de massa muscular"
+        try:
+            update_user_profile(uid, goal=goal_text)
+            add_health_goal(uid, goal_text)
+        except Exception as exc:
+            logger.error("edit goal_muscle: save failed: %s", exc)
+            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
+            return True
+        context.user_data.pop(_EDIT_STEP, None)
+        await update.message.reply_text(
+            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == "goal_body_fat":
+        try:
+            target = float(text.replace(",", "."))
+            if not (1 <= target <= 60):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere uma percentagem entre 1 e 60 _(ex: 15)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        goal_text = f"Atingir {target:.1f}% de gordura corporal"
+        try:
+            update_user_profile(uid, goal=goal_text)
+            add_health_goal(uid, goal_text)
+        except Exception as exc:
+            logger.error("edit goal_body_fat: save failed: %s", exc)
+            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
+            return True
+        context.user_data.pop(_EDIT_STEP, None)
+        await update.message.reply_text(
+            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    if step == "goal_visceral_fat":
+        try:
+            target = float(text.replace(",", "."))
+            if not (1 <= target <= 30):
+                raise ValueError
+        except ValueError:
+            await update.message.reply_text(
+                "❌ Valor inválido. Insere um nível entre 1 e 30 _(ex: 6)_.",
+                parse_mode="Markdown",
+            )
+            return True
+        goal_text = f"Atingir nível {target:.1f} de gordura visceral"
+        try:
+            update_user_profile(uid, goal=goal_text)
+            add_health_goal(uid, goal_text)
+        except Exception as exc:
+            logger.error("edit goal_visceral_fat: save failed: %s", exc)
+            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
+            return True
+        context.user_data.pop(_EDIT_STEP, None)
+        await update.message.reply_text(
+            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
+            reply_markup=_edit_main_keyboard(),
+            parse_mode="Markdown",
+        )
+        return True
+
+    return False
+
+
+# ══════════════════════════════════════════════════════
 # REGULAR COMMAND HANDLERS
 # ══════════════════════════════════════════════════════
 
@@ -1044,6 +1457,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if await _handle_onboarding_text(update, context):
         return
     if await _handle_prefs_text(update, context):
+        return
+    if await _handle_edit_text(update, context):
         return
 
     uid  = _uid(update)
@@ -1170,11 +1585,13 @@ def create_telegram_app() -> Application:
     # Inline keyboard callbacks (highest priority)
     app.add_handler(CallbackQueryHandler(handle_onboarding_callback, pattern="^ob_"))
     app.add_handler(CallbackQueryHandler(handle_prefs_callback,      pattern="^prefs_"))
+    app.add_handler(CallbackQueryHandler(handle_edit_callback,       pattern="^edit_"))
 
     # Commands
     app.add_handler(CommandHandler("start",         cmd_start))
     app.add_handler(CommandHandler("help",          cmd_help))
     app.add_handler(CommandHandler("perfil",        cmd_perfil))
+    app.add_handler(CommandHandler("editar",        cmd_editar))
     app.add_handler(CommandHandler("preferencias",  cmd_preferencias))
     app.add_handler(CommandHandler("peso",          cmd_peso))
     app.add_handler(CommandHandler("historico",     cmd_historico))

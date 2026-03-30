@@ -496,7 +496,8 @@ def sync_tanita_measurements(user_id: str | int) -> str:
 @xai_tool
 def get_body_composition_history(
     user_id: str | int,
-    limit: int = 10,
+    limit: int = 30,
+    date_filter: str = "",
 ) -> str:
     """
     Retrieve the user's body composition history from Tanita measurements.
@@ -507,34 +508,105 @@ def get_body_composition_history(
 
     Args:
         user_id: Telegram user ID
-        limit: Number of recent entries to show (default 10, max 50)
+        limit: Number of recent entries to show (default 30, max 500).
+            Use a high value (e.g. 1000) when the user asks about long-term
+            trends, the oldest record, or history spanning months/years.
+        date_filter: Optional ISO date (YYYY-MM-DD) to filter results to that
+            specific day. When provided, returns all measurements on that date
+            plus the nearest measurement before it if none exist on that exact
+            date. Always convert user-supplied dates to ISO format before
+            calling this tool (e.g. '01/03/2026' in DD/MM/YYYY → '2026-03-01').
 
     Returns:
         Formatted body composition history
     """
     user_id = str(user_id)
-    limit = min(int(limit), 50)
+    limit = min(int(limit), 1000)
 
     conn = _get_db()
-    rows = conn.execute(
-        """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
-                  muscle_mass_kg, muscle_quality, bone_mass_kg,
-                  bmr_kcal, metabolic_age, body_water_pct, physique_rating
+
+    # Always fetch global stats so the LLM knows the full extent of history
+    stats = conn.execute(
+        """SELECT COUNT(*) as total,
+                  MIN(measured_at) as first_date,
+                  MAX(measured_at) as last_date
            FROM body_composition_history
-           WHERE user_id = ?
-           ORDER BY measured_at DESC
-           LIMIT ?""",
-        (user_id, limit),
-    ).fetchall()
+           WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    total_records = stats["total"] if stats else 0
+    first_date = stats["first_date"][:10] if stats and stats["first_date"] else None
+    last_date = stats["last_date"][:10] if stats and stats["last_date"] else None
+
+    if date_filter:
+        # Exact day match first
+        day_start = f"{date_filter} 00:00:00"
+        day_end = f"{date_filter} 23:59:59"
+        rows = conn.execute(
+            """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
+                      muscle_mass_kg, muscle_quality, bone_mass_kg,
+                      bmr_kcal, metabolic_age, body_water_pct, physique_rating
+               FROM body_composition_history
+               WHERE user_id = ? AND measured_at BETWEEN ? AND ?
+               ORDER BY measured_at DESC""",
+            (user_id, day_start, day_end),
+        ).fetchall()
+        # If no exact match, return the closest measurement before that date
+        if not rows:
+            rows = conn.execute(
+                """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
+                          muscle_mass_kg, muscle_quality, bone_mass_kg,
+                          bmr_kcal, metabolic_age, body_water_pct, physique_rating
+                   FROM body_composition_history
+                   WHERE user_id = ? AND measured_at < ?
+                   ORDER BY measured_at DESC
+                   LIMIT 1""",
+                (user_id, day_start),
+            ).fetchall()
+            if rows:
+                closest_date = rows[0]["measured_at"][:10]
+                date_note = (
+                    f"⚠️ Sem medição em {date_filter}. "
+                    f"Medição mais próxima anterior: {closest_date}."
+                )
+            else:
+                date_note = f"⚠️ Sem medição em {date_filter} nem medições anteriores."
+        else:
+            date_note = None
+    else:
+        date_note = None
+        rows = conn.execute(
+            """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
+                      muscle_mass_kg, muscle_quality, bone_mass_kg,
+                      bmr_kcal, metabolic_age, body_water_pct, physique_rating
+               FROM body_composition_history
+               WHERE user_id = ?
+               ORDER BY measured_at DESC
+               LIMIT ?""",
+            (user_id, limit),
+        ).fetchall()
     conn.close()
 
     if not rows:
-        return (
+        no_data_msg = (
             "📊 Sem dados de composição corporal.\n"
             "Usa /tanita para sincronizar medições do MyTanita."
         )
+        if date_note:
+            return f"{date_note}\n{no_data_msg}"
+        return no_data_msg
 
-    lines = [f"📊 Composição corporal — últimas {len(rows)} medições:\n"]
+    stats_line = (
+        f"📈 Histórico total: {total_records} medições "
+        f"(de {first_date} a {last_date}). "
+        f"A mostrar: {len(rows)} {'medição' if len(rows) == 1 else 'medições'}"
+        + (f" filtradas para {date_filter}" if date_filter else f" mais recentes (limit={limit})")
+        + ".\n"
+    )
+    header = stats_line
+    if date_note:
+        header = f"{date_note}\n{header}"
+    lines = [header]
     for r in rows:
         date_str = r["measured_at"][:16]
         lines.append(f"📅 {date_str}")

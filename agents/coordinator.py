@@ -71,6 +71,14 @@ def create_health_team() -> Team:
             "    body fat on 20/03/2026 (same date as the previous weight question).' "
             "    Never route a bare follow-up like 'E a massa gorda?' without context.",
 
+            # ── Date format ─────────────────────────────────────────────────
+            "DATE FORMAT:",
+            "  • Users always write dates in European format: DD/MM/YYYY.",
+            "    NEVER interpret them as MM/DD/YYYY.",
+            "    '01/03/2026' = 1 de Março de 2026, NOT January 3.",
+            "  • When routing a request that contains a date, include the date "
+            "    in ISO format (YYYY-MM-DD) in the task sent to the specialist.",
+
             # ── Ambiguity & Intent Recognition ─────────────────────────────
             "AMBIGUITY & INTENT RECOGNITION:",
             "  • Tolerate typos, abbreviations, and informal language (e.g. 'tou a tentar "

@@ -291,36 +291,58 @@ def add_health_goal(user_id: str | int, goal: str) -> str:
 
 
 @xai_tool
-def get_weight_history(user_id: str | int) -> str:
+def get_weight_history(user_id: str | int, limit: int = 30) -> str:
     """
     Get the user's weight tracking history.
 
     Args:
         user_id: Telegram user ID
+        limit: Number of recent entries to return (default 30, max 1000).
+            Use limit=1000 when the user asks about long-term trends, the
+            oldest/first record, or history spanning months or years.
 
     Returns:
-        Weight history with dates and trend
+        Weight history with dates and trend. The first line always shows
+        the total number of records and the full date range, regardless
+        of the limit, so the LLM knows the complete history available.
     """
     user_id = str(user_id)
+    limit = min(int(limit), 1000)
     conn = _get_db()
+
+    stats = conn.execute(
+        """SELECT COUNT(*) as total,
+                  MIN(recorded_at) as first_date,
+                  MAX(recorded_at) as last_date
+           FROM weight_history WHERE user_id = ?""",
+        (user_id,),
+    ).fetchone()
+    total = stats["total"] if stats else 0
+    first_date = stats["first_date"][:10] if stats and stats["first_date"] else None
+    last_date = stats["last_date"][:10] if stats and stats["last_date"] else None
+
     rows = conn.execute(
         """SELECT weight_kg, recorded_at FROM weight_history
-           WHERE user_id = ? ORDER BY recorded_at DESC LIMIT 20""",
-        (user_id,),
+           WHERE user_id = ? ORDER BY recorded_at DESC LIMIT ?""",
+        (user_id, limit),
     ).fetchall()
     conn.close()
 
     if not rows:
         return "📊 Sem histórico de peso. Usa /peso <kg> para registar."
 
-    lines = ["📊 Histórico de peso:\n"]
+    lines = [
+        f"📈 Histórico total: {total} registos (de {first_date} a {last_date}). "
+        f"A mostrar: {len(rows)} mais recentes (limit={limit}).\n",
+        "📊 Histórico de peso:\n",
+    ]
     for row in rows:
         lines.append(f"  {row['recorded_at'][:10]}: {row['weight_kg']} kg")
 
     if len(rows) >= 2:
         diff = rows[0]["weight_kg"] - rows[-1]["weight_kg"]
         icon = "⬇️" if diff < 0 else "⬆️" if diff > 0 else "➡️"
-        lines.append(f"\n{icon} Variação: {diff:+.1f} kg")
+        lines.append(f"\n{icon} Variação no período mostrado: {diff:+.1f} kg")
 
     return "\n".join(lines)
 

@@ -47,13 +47,30 @@ body_composition_analyst_agent = Agent(
         "MANDATORY: Check the user profile via get_user_profile to contextualise "
         "body composition metrics against the user's age, sex, and goals.",
 
+        # ── Date handling ──────────────────────────────────────────────────
+        "DATE FORMAT — mandatory rule:",
+        "  • The user always writes dates in European format: DD/MM/YYYY.",
+        "    NEVER interpret them as MM/DD/YYYY.",
+        "    Examples: '01/03/2026' = 1 de Março de 2026 (NOT January 3).",
+        "              '12/03/2026' = 12 de Março de 2026 (NOT December 3).",
+        "  • When calling get_body_composition_history with a specific date, "
+        "    convert DD/MM/YYYY → ISO format YYYY-MM-DD for the date_filter arg.",
+        "    Example: '01/03/2026' → date_filter='2026-03-01'.",
+        "  • ALWAYS pass date_filter when the user asks about a specific date.",
+
         # ── Sync & data retrieval ──────────────────────────────────────────
         "DATA SYNC:",
         "  • Use sync_tanita_measurements when the user asks to sync, import, or "
         "    update their Tanita scale data.",
-        "  • Use get_body_composition_history to review body composition trends.",
-        "  • After syncing, always follow up with a brief summary of the latest "
-        "    measurements and any notable changes.",
+        "  • Use get_body_composition_history to review body composition trends. "
+        "    Pass limit=1000 whenever the user asks about long-term trends, the "
+        "    oldest/first record, or history spanning months or years. "
+        "    The default limit=30 is only suitable for recent data.",
+        "  • MANDATORY: After calling sync_tanita_measurements, you MUST immediately "
+        "    call get_body_composition_history to retrieve the actual latest values, "
+        "    then report those REAL values in your response. "
+        "    NEVER use placeholder text like 'último valor', 'last value', or any "
+        "    template variable — always report the exact numbers returned by the tool.",
 
         # ── Interpretation & insights ──────────────────────────────────────
         "ANALYSIS:",
