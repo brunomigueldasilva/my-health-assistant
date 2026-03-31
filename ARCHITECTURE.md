@@ -1,10 +1,10 @@
-# Arquitectura — MyHealthAssistant
+# Architecture — MyHealthAssistant
 
-Sistema multi-agente de saúde pessoal construído com [Agno](https://github.com/agno-agi/agno), ChromaDB e suporte a 5 LLM providers.
+Multi-agent personal health system built with [Agno](https://github.com/agno-agi/agno), ChromaDB, and support for 5 LLM providers.
 
 ---
 
-## 1. Visão geral dos componentes
+## 1. Component overview
 
 ```mermaid
 graph TB
@@ -21,7 +21,7 @@ graph TB
         BC["Body Composition\nAnalyst Agent"]
     end
 
-    subgraph ferramentas["Ferramentas & Dados"]
+    subgraph tools["Tools & Data"]
         PT["Profile Tools\n(SQLite)"]
         NT["Nutrition Tools"]
         ET["Exercise Tools"]
@@ -64,9 +64,9 @@ graph TB
 
 ---
 
-## 2. Routing pelo Coordinator
+## 2. Routing by the Coordinator
 
-O Coordinator usa `mode="route"` do Agno: analisa a mensagem, selecciona **um** especialista e passa-lhe o contexto completo.
+The Coordinator uses Agno's `mode="route"`: it analyses the message, selects **one** specialist, and passes the full context to it.
 
 ```mermaid
 flowchart TD
@@ -87,46 +87,46 @@ flowchart TD
     style RESP fill:#0284c7,color:#fff
 ```
 
-**Regras de governance aplicadas pelo Coordinator antes de rotear:**
-- Recusa restrições calóricas extremas (`< 800 kcal/dia`)
-- Recusa diagnósticos médicos ou prescrições
-- Recusa pedidos fora do âmbito de saúde
-- Injeta contexto de mensagens anteriores em follow-ups
+**Governance rules enforced by the Coordinator before routing:**
+- Refuses extreme caloric restrictions (`< 800 kcal/day`)
+- Refuses medical diagnoses or prescriptions
+- Refuses requests outside the health domain
+- Injects previous message context into follow-ups
 
 ---
 
-## 3. Consulta RAG (ChromaDB)
+## 3. RAG query (ChromaDB)
 
-Cada agente especialista consulta a base de conhecimento vectorial antes de responder.
+Each specialist agent queries the vector knowledge base before responding.
 
 ```mermaid
 sequenceDiagram
-    participant A as Agente Especialista
+    participant A as Specialist Agent
     participant T as Tool (@xai_tool)
     participant C as ChromaDB
     participant XAI as XAI Tracker
 
     A->>T: search_food_nutrition("proteína frango")
     T->>C: collection.query(query_texts=[...], n_results=5)
-    C-->>T: top-5 documentos por cosine similarity
+    C-->>T: top-5 documents by cosine similarity
     T->>XAI: log_rag(collection, query, hits)
-    T-->>A: JSON com resultados relevantes
+    T-->>A: JSON with relevant results
 
-    Note over C: 3 colecções:<br/>nutrition_knowledge<br/>exercise_knowledge<br/>user_preferences
-    Note over XAI: Registo visível no<br/>tab Explicabilidade (Gradio)
+    Note over C: 3 collections:<br/>nutrition_knowledge<br/>exercise_knowledge<br/>user_preferences
+    Note over XAI: Visible in the<br/>Explainability tab (Gradio)
 ```
 
-**Colecções ChromaDB:**
+**ChromaDB collections:**
 
-| Colecção | Conteúdo | Filtro |
+| Collection | Content | Filter |
 |---|---|---|
-| `nutrition_knowledge` | Alimentos, macros, dietas, suplementos | `type = "nutrition"` |
-| `exercise_knowledge` | Exercícios, grupos musculares, planos | `type = "exercise"` |
-| `user_preferences` | Gostos, alergias, restrições, objectivos | `user_id + category` |
+| `nutrition_knowledge` | Foods, macros, diets, supplements | `type = "nutrition"` |
+| `exercise_knowledge` | Exercises, muscle groups, plans | `type = "exercise"` |
+| `user_preferences` | Preferences, allergies, restrictions, goals | `user_id + category` |
 
 ---
 
-## 4. Diagrama de sequência — conversa típica
+## 4. Sequence diagram — typical conversation
 
 ```mermaid
 sequenceDiagram
@@ -168,7 +168,7 @@ sequenceDiagram
 
 ---
 
-## 5. Persistência de dados
+## 5. Data persistence
 
 ```mermaid
 graph LR
@@ -198,14 +198,14 @@ graph LR
 
 ---
 
-## 6. Decisões de arquitectura
+## 6. Architecture decisions
 
-| Decisão | Escolha | Justificação |
+| Decision | Choice | Rationale |
 |---|---|---|
-| Framework de agentes | Agno | `mode="route"` nativo, session management com SQLite, tool calling automático |
-| Vector store | ChromaDB | Persistência local, sem servidor externo, embedding por defeito suficiente para este domínio |
-| Base de dados | SQLite | Zero configuração, WAL mode para concorrência Gradio/Telegram |
-| LLM | Configurável (5 providers) | Evita vendor lock-in; permite execução local (privacidade) ou cloud (desempenho) |
-| Interfaces | Telegram + Gradio | Telegram para uso móvel/quotidiano; Gradio para demo e administração |
-| Automação Tanita | Playwright | Portal MyTanita não tem API pública; scraping controlado e encapsulado numa tool |
-| Linguagem de output | Português de Portugal | Público-alvo; enforced no system prompt do Coordinator |
+| Agent framework | Agno | Native `mode="route"`, SQLite session management, automatic tool calling |
+| Vector store | ChromaDB | Local persistence, no external server, default embedding sufficient for this domain |
+| Database | SQLite | Zero configuration, WAL mode for Gradio/Telegram concurrency |
+| LLM | Configurable (5 providers) | Avoids vendor lock-in; allows local execution (privacy) or cloud (performance) |
+| Interfaces | Telegram + Gradio | Telegram for mobile/daily use; Gradio for demo and administration |
+| Tanita automation | Playwright | MyTanita portal has no public API; controlled scraping encapsulated in a tool |
+| Output language | European Portuguese | Target audience; enforced in the Coordinator's system prompt |
