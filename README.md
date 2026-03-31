@@ -14,7 +14,7 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 | 🏋️ **Personal Trainer** | Workouts, exercises, routines, fitness plans |
 | 👨‍🍳 **Chef** | Personalised recipes respecting food preferences and allergies |
 | 📊 **Body Composition Analyst** | Syncs Tanita scale data, interprets body fat, visceral fat, muscle mass, BMR, metabolic age |
-| 🗄️ **RAG Knowledge Base** | ChromaDB with nutrition knowledge, exercise knowledge, and user preferences |
+| 🗄️ **RAG Knowledge Base** | ChromaDB with nutrition knowledge, exercise knowledge, and per-user preferences (food likes/dislikes, allergies, dietary restrictions, and health goals) |
 | 👤 **User Profile** | SQLite with personal data, weight history, and body composition history |
 | 💬 **Session Storage** | SQLite with per-user conversation history (managed by Agno) |
 | 🔍 **Explainability (XAI)** | Transparent tracking of tool calls and RAG queries per message |
@@ -182,20 +182,29 @@ On first run the knowledge base is automatically seeded with nutritional and exe
 
 ### Onboarding
 
-When a new user sends `/start`, a guided 4-step onboarding flow is launched using inline keyboards — no manual typing required for structured choices:
+When a new user sends `/start`, a guided onboarding flow is launched using inline keyboards — no manual typing required for structured choices:
 
 ```
 /start
- ├─ New user → interactive onboarding (4 steps, ~1 minute)
+ ├─ New user → interactive onboarding (~1 minute)
  │    ├─ Step 1 — Personal data
- │    │    ├─ Gender         → buttons (Male / Female)
+ │    │    ├─ Gender         → 3 buttons (Male / Female / (Other / Prefer not to say))
  │    │    ├─ Date of birth  → free text input  (ex: 15/01/1990)  [skippable]
  │    │    ├─ Height         → free text input  (ex: 175)          [skippable]
  │    │    └─ Weight         → free text input  (ex: 78.5)         [skippable]
  │    ├─ Step 2 — Activity level  → 5 buttons (Sedentary → Very active)
- │    ├─ Step 3 — Health goal     → 8 buttons
- │    │    └─ "Target weight" → extra text input for target kg [skippable]
- │    └─ Step 4 — Allergies       → multi-select toggle buttons + confirm
+ │    ├─ Step 3 — Health goal     → 13 buttons
+ │    │    ├─ Perder peso / Ganhar massa muscular / Perder massa gorda
+ │    │    ├─ Perder gordura visceral / Manter peso / Melhorar condição física
+ │    │    ├─ Melhorar saúde em geral / Melhores hábitos alimentares
+ │    │    ├─ Definir abdominais
+ │    │    └─ Target goals → extra text input for the specific target value [skippable]:
+ │    │         ├─ Atingir peso específico        (ex: 75 kg)
+ │    │         ├─ Atingir massa muscular específica (ex: 65 kg ou 60%)
+ │    │         ├─ Atingir gordura corporal específica (ex: 15%)
+ │    │         └─ Atingir gordura visceral específica (ex: 6)
+ │    └─ Step 4 — Allergies  → 6 multi-select toggle buttons + "None" + Confirm
+ │         (Glúten · Lactose · Frutos secos · Marisco · Ovos · Amendoins)
  │         → Profile summary shown on completion
  │
  └─ Returning user → welcome-back message (onboarding skipped)
@@ -217,9 +226,9 @@ After onboarding the assistant immediately uses the profile to personalise all a
 | Command | Description |
 |---|---|
 | `/start` | Welcome message — launches onboarding for new users |
-| `/cancel` | Cancel onboarding at any step |
-| `/perfil` | View and edit full profile |
-| `/preferencias` | Manage food likes/dislikes, allergies, restrictions and goals |
+| `/perfil` | View current profile summary |
+| `/editar` | Edit profile fields (name, birth date, gender, height, weight, activity level, goal) |
+| `/preferencias` | Manage food likes/dislikes, allergies, dietary restrictions and health goals |
 | `/peso <kg>` | Log current weight |
 | `/historico` | View weight history and trend |
 | `/reset` | Clear conversation history (new session) |

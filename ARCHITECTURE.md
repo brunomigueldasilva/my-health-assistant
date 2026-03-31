@@ -13,7 +13,7 @@ graph TB
         GR["Gradio Web UI"]
     end
 
-    subgraph Agno Team — mode=route
+    subgraph agnoTeam["Agno Team — mode=route"]
         CO["Coordinator\n(Router + Governance)"]
         NU["Nutritionist\nAgent"]
         TR["Personal Trainer\nAgent"]
@@ -168,17 +168,17 @@ sequenceDiagram
 
 ```mermaid
 graph LR
-    subgraph SQLite — user_profiles.db
+    subgraph sqliteProfiles["SQLite — user_profiles.db"]
         UP["user_profiles\nuser_id · nome · idade · peso · objectivo"]
         WH["weight_history\nuser_id · peso_kg · data"]
         BC["body_composition_history\nuser_id · gordura · músculo · IMC · ..."]
     end
 
-    subgraph SQLite — sessions.db
+    subgraph sqliteSessions["SQLite — sessions.db"]
         SS["sessions\nsession_id · messages · timestamps"]
     end
 
-    subgraph ChromaDB — data/chromadb/
+    subgraph chromadb["ChromaDB — data/chromadb/"]
         NK["nutrition_knowledge"]
         EK["exercise_knowledge"]
         UP2["user_preferences"]
