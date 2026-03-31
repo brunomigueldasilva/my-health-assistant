@@ -30,7 +30,7 @@ graph TB
         DB["SQLite\nuser_profiles · sessions"]
     end
 
-    subgraph LLM Providers
+    subgraph llmProviders["LLM Providers"]
         OL["Ollama\n(local)"]
         LS["LM Studio\n(local)"]
         GM["Gemini"]
@@ -55,11 +55,11 @@ graph TB
     NT & ET --> KB
     PT --> DB
 
-    CO -.->|get_model()| OL
-    CO -.->|get_model()| LS
-    CO -.->|get_model()| GM
-    CO -.->|get_model()| OA
-    CO -.->|get_model()| AN
+    CO -.->|get_model| OL
+    CO -.->|get_model| LS
+    CO -.->|get_model| GM
+    CO -.->|get_model| OA
+    CO -.->|get_model| AN
 ```
 
 ---
