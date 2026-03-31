@@ -21,7 +21,7 @@ graph TB
         BC["Body Composition\nAnalyst Agent"]
     end
 
-    subgraph Ferramentas & Dados
+    subgraph ferramentas["Ferramentas & Dados"]
         PT["Profile Tools\n(SQLite)"]
         NT["Nutrition Tools"]
         ET["Exercise Tools"]
@@ -55,7 +55,11 @@ graph TB
     NT & ET --> KB
     PT --> DB
 
-    CO -.->|get_model()| OL & LS & GM & OA & AN
+    CO -.->|get_model()| OL
+    CO -.->|get_model()| LS
+    CO -.->|get_model()| GM
+    CO -.->|get_model()| OA
+    CO -.->|get_model()| AN
 ```
 
 ---
