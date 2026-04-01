@@ -9,8 +9,8 @@ Multi-agent personal health system built with [Agno](https://github.com/agno-agi
 ```mermaid
 graph TB
     subgraph Interfaces
-        TG["Telegram Bot"]
-        GR["Gradio Web UI"]
+        TG["Telegram Bot\n(onboarding · commands · chat)"]
+        GR["Gradio Web UI\n(5 tabs — incl. Objectivo dashboard)"]
     end
 
     subgraph agnoTeam["Agno Team — mode=route"]
@@ -55,6 +55,9 @@ graph TB
     NT & ET --> KB
     PT --> DB
 
+    GR -.->|direct SQLite read| DB
+    GR -.->|direct ChromaDB read| KB
+
     CO -.->|get_model| OL
     CO -.->|get_model| LS
     CO -.->|get_model| GM
@@ -70,7 +73,7 @@ The Coordinator uses Agno's `mode="route"`: it analyses the message, selects **o
 
 ```mermaid
 flowchart TD
-    MSG["Mensagem do utilizador\n+ prefixo [data] [user_id]"]
+    MSG["Mensagem do utilizador\n+ prefixo [Data: DD/MM/AAAA] [ID: uid]"]
     CO{"Coordinator\nanalisa intenção"}
 
     MSG --> CO
@@ -92,6 +95,7 @@ flowchart TD
 - Refuses medical diagnoses or prescriptions
 - Refuses requests outside the health domain
 - Injects previous message context into follow-ups
+- **Forwards user ID:** every routed task begins with `[Data de hoje: DD/MM/AAAA] [ID do utilizador: <UID>]` so specialists always call tools with the correct user account
 
 ---
 
@@ -143,7 +147,7 @@ sequenceDiagram
     I->>CO: team.arun(enriched_message, session_id)
 
     CO->>CO: Analisa intenção → "meal plan · weight loss"
-    CO->>NU: Roteia com contexto completo
+    CO->>NU: Roteia com contexto completo + [ID: user_123]
 
     NU->>PT: get_user_profile(user_id)
     PT-->>NU: {peso: 80kg, altura: 175cm, objectivo: perder peso}
@@ -185,20 +189,53 @@ graph LR
     subgraph chromadb["ChromaDB — data/chromadb/"]
         NK["nutrition_knowledge"]
         EK["exercise_knowledge"]
-        UP2["user_preferences"]
+        UP2["user_preferences\n(goals · allergies · likes · dislikes)"]
     end
 
     PT["Profile Tools"] --> UP & WH
+    PT --> UP2
     TT["Tanita Tools"] --> BC
     AG["Agno Framework"] --> SS
     NT["Nutrition Tools"] --> NK
     ET["Exercise Tools"] --> EK
-    PT2["Profile Tools"] --> UP2
+
+    GR["Gradio Dashboard"] -.->|read KPIs + charts| UP & WH & BC
+    GR -.->|read goals for target inference| UP2
 ```
+
+**Goals sync:** when a goal is saved via Telegram or Gradio it is written to both ChromaDB (`user_preferences`, category `goals`) and to the `goal` column in `user_profiles`. This ensures agents have full context via RAG and the Objectivo dashboard can compute personalised numeric targets without an LLM call.
 
 ---
 
-## 6. Architecture decisions
+## 6. Objectivo Dashboard (Gradio)
+
+The **🎯 Objectivo** tab provides a real-time health progress view by reading directly from SQLite and ChromaDB — no agent call required.
+
+```mermaid
+flowchart TD
+    UID["User ID"]
+
+    UID --> KPI["load_dashboard_kpis()\nLatest body fat · visceral fat\nmuscle mass · weight"]
+    UID --> TGT["_compute_targets()\nParse goal text → numeric targets\n(regex + BMI/lean-mass fallback)"]
+    UID --> CHARTS["load_dashboard_charts()\n4 time-series charts\n(fat % · visceral · weight · muscle)"]
+    UID --> PROG["load_dashboard_progress()\nNatural-language progress summary\nvs. computed targets"]
+
+    KPI & TGT --> DISPLAY["Dashboard HTML\nKPI cards + progress bars\n+ 4 interactive charts"]
+    CHARTS --> DISPLAY
+    PROG --> DISPLAY
+
+    style DISPLAY fill:#0284c7,color:#fff
+```
+
+**Target inference logic (`_compute_targets`):**
+1. Read all goals from ChromaDB (`user_preferences`, category `goals`) — supports users with multiple simultaneous goals
+2. Extract numeric targets via regex patterns (weight kg, fat %, visceral level)
+3. Infer missing targets from defined ones using the user's current muscle-to-lean-mass ratio
+4. BMI formula fallback for weight if no explicit target is found
+
+---
+
+## 7. Architecture decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
@@ -206,6 +243,9 @@ graph LR
 | Vector store | ChromaDB | Local persistence, no external server, default embedding sufficient for this domain |
 | Database | SQLite | Zero configuration, WAL mode for Gradio/Telegram concurrency |
 | LLM | Configurable (5 providers) | Avoids vendor lock-in; allows local execution (privacy) or cloud (performance) |
-| Interfaces | Telegram + Gradio | Telegram for mobile/daily use; Gradio for demo and administration |
+| Interfaces | Telegram + Gradio | Telegram for mobile/daily use; Gradio for demo, dashboard and administration |
 | Tanita automation | Playwright | MyTanita portal has no public API; controlled scraping encapsulated in a tool |
 | Output language | European Portuguese | Target audience; enforced in the Coordinator's system prompt |
+| Dashboard reads | Direct SQLite/ChromaDB | Avoids LLM latency for purely data-driven views; keeps agent calls for natural-language tasks |
+| Goals storage | ChromaDB + SQLite sync | ChromaDB for semantic agent queries; SQLite for fast dashboard target inference |
+| User ID forwarding | Coordinator instruction | Guarantees all specialist tool calls use the correct account regardless of routing depth |

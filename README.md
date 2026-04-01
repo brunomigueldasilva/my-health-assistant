@@ -1,7 +1,24 @@
-# 🏥 Personal Health Assistant — Agno + LLM + Telegram + Gradio
+# MyHealthAssistant — Personal Health Coach powered by AI
+
+> **O teu nutricionista, personal trainer e chef pessoal, disponível 24/7 no telemóvel, com total privacidade dos dados.**
 
 A multi-agent personal health assistant with RAG, powered by the [Agno](https://github.com/agno-agi/agno) framework.
 Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram Bot** and a **Gradio Web UI**.
+
+---
+
+## 💡 Why MyHealthAssistant?
+
+| Serviço equivalente | Custo habitual | Com MyHealthAssistant |
+|---|---|---|
+| Consulta de nutricionista | €60–120 / consulta | Planos ilimitados incluídos |
+| Personal trainer | €40–80 / sessão | Treinos ilimitados incluídos |
+| App de rastreio premium | €10–15 / mês | Gratuito (open-source) |
+| **Poupança estimada** | **€200–400 / mês** | **€0 com Ollama local** |
+
+**Ganho de tempo:** redução de ~3 horas/semana de pesquisa e planeamento para menos de 5 minutos.
+
+**Privacidade total:** com Ollama ou LM Studio, nenhum dado sai do teu computador.
 
 ---
 
@@ -34,7 +51,23 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 
 ## 🚀 Setup
 
-### 1. Choose your LLM provider
+### Quick start (recommended)
+
+```bash
+# macOS / Linux
+bash setup.sh
+
+# Windows
+setup.bat
+```
+
+The setup script will: check your Python version, create a virtual environment, install all dependencies, install Playwright, copy `.env.example` → `.env`, and validate your configuration.
+
+---
+
+### Manual setup
+
+#### 1. Choose your LLM provider
 
 > 💡 **Recommended local model: `qwen2.5:32b`** (Ollama or LM Studio)
 > Best-performing model for this project — reliable tool calling and consistent agent routing.
@@ -126,7 +159,7 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 
 ---
 
-### 2. Create a Telegram Bot
+#### 2. Create a Telegram Bot
 
 1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
 2. Send `/newbot` and follow the instructions
@@ -134,16 +167,16 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 
 ---
 
-### 3. Install dependencies
+#### 3. Install dependencies
 
 ```bash
-python -m venv venv
+python -m venv .venv
 
 # Windows
-venv\Scripts\activate
+.venv\Scripts\activate
 
 # macOS / Linux
-source venv/bin/activate
+source .venv/bin/activate
 
 pip install -r requirements.txt
 
@@ -153,7 +186,7 @@ playwright install chromium
 
 ---
 
-### 4. Configure
+#### 4. Configure
 
 ```bash
 cp .env.example .env
@@ -167,7 +200,7 @@ Edit `.env` and set at minimum:
 
 ---
 
-### 5. Run
+#### 5. Run
 
 ```bash
 python main.py
@@ -193,7 +226,7 @@ When a new user sends `/start`, a guided onboarding flow is launched using inlin
  │    │    ├─ Height         → free text input  (ex: 175)          [skippable]
  │    │    └─ Weight         → free text input  (ex: 78.5)         [skippable]
  │    ├─ Step 2 — Activity level  → 5 buttons (Sedentary → Very active)
- │    ├─ Step 3 — Health goal     → 13 buttons
+ │    ├─ Step 3 — Health goals    → multi-select (up to 3 goals simultaneously)
  │    │    ├─ Perder peso / Ganhar massa muscular / Perder massa gorda
  │    │    ├─ Perder gordura visceral / Manter peso / Melhorar condição física
  │    │    ├─ Melhorar saúde em geral / Melhores hábitos alimentares
@@ -238,16 +271,26 @@ After onboarding the assistant immediately uses the profile to personalise all a
 
 ## 🌐 Gradio Web UI
 
-A full web interface with **4 tabs**:
+A full web interface with **5 tabs**:
 
 | Tab | Description |
 |---|---|
 | 💬 **Conversa** | Chat with the agents in real time + XAI panel |
 | 👤 **O Meu Perfil** | Edit personal data and log weight (chart included) |
 | 🥗 **Preferências** | Manage likes, dislikes, allergies, restrictions and goals |
+| 🎯 **Objectivo** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
 | ⚙️ **Administração** | Sub-tabs: Explicabilidade · Sessões · Logs · Base de Conhecimento |
 
 > The **User ID** is shared across all tabs. Use your Telegram user ID to access existing profile data in the web UI.
+
+### 🎯 Objectivo Dashboard
+
+The dashboard tab gives a real-time snapshot of health progress without needing to ask the assistant:
+
+- **KPIs** — current values for body fat %, visceral fat, muscle mass and weight, each compared against the personalised target derived from the user's goals
+- **Progress charts** — interactive time-series for all four metrics, filterable by start date
+- **Progress summary** — natural-language summary of distance to each target and trend direction
+- **Smart target inference** — targets are automatically computed from the user's stated goals (e.g. "perder gordura visceral para nível 6" or "atingir 75 kg") using numeric extraction and BMI/lean-mass formulas as fallback
 
 ---
 
@@ -285,6 +328,8 @@ MyHealthAssistant/
 ├── main.py                           # Entry point — starts Telegram bot + Gradio UI
 ├── requirements.txt
 ├── .env / .env.example
+├── setup.sh                          # Setup script (macOS / Linux)
+├── setup.bat                         # Setup script (Windows)
 ├── ARCHITECTURE.md                   # Flow diagrams and architecture decisions
 ├── config/
 │   └── __init__.py                   # Configuration constants + LLM model factory
@@ -296,14 +341,14 @@ MyHealthAssistant/
 │   └── body_composition_analyst.py   # Body Composition Analyst agent (Tanita)
 ├── interfaces/
 │   ├── telegram_bot.py               # Telegram interface + onboarding flow
-│   └── gradio_app.py                 # Gradio Web UI (4 tabs)
+│   └── gradio_app.py                 # Gradio Web UI (5 tabs incl. Objectivo dashboard)
 ├── knowledge/
 │   ├── __init__.py                   # KnowledgeBase class — ChromaDB wrapper
 │   └── seed_data.py                  # Initial seed data (nutrition + exercises)
 ├── tools/
 │   ├── nutrition_tools.py            # Calories, macros, food lookup (Open Food Facts fallback)
 │   ├── exercise_tools.py             # Exercises, workout plans, calorie burn (MET)
-│   ├── profile_tools.py              # Profile, preferences, weight history
+│   ├── profile_tools.py              # Profile, preferences, weight history, goals sync
 │   └── tanita_tools.py               # Tanita portal sync via Playwright
 ├── xai/
 │   └── __init__.py                   # ExplainabilityTracker + @xai_tool decorator
@@ -352,6 +397,8 @@ Three collections, all using **cosine similarity** with `all-MiniLM-L6-v2` embed
 | `user_preferences` | Short texts per user: food likes/dislikes, allergies, dietary restrictions, health goals | Filtered by `user_id` + `category` metadata; semantic search for free-text preference queries |
 | `nutrition_knowledge` | Nutritional information: foods, calories, macros, diet guidance | Semantic RAG — retrieved by the Nutritionist and Chef agents |
 | `exercise_knowledge` | Exercise descriptions, muscle groups, workout plans, calorie burn estimates | Semantic RAG — retrieved by the Personal Trainer agent |
+
+> **Goals sync:** when a goal is added or updated it is written to both ChromaDB (for semantic search) and SQLite (for the dashboard's target computation and agent context).
 
 ---
 
@@ -426,6 +473,10 @@ Agno automatically persists each session's history in `data/sessions.db`. Each u
 ### Log persistence
 
 Logs are written in **append mode** across restarts — each run appends to `logs/health-assistant.log` with a `── new run ──` separator. The file rotates at 5 MB (up to 3 backup files kept).
+
+### User ID forwarding
+
+Every message arriving at the Coordinator is prefixed with `[Data de hoje: DD/MM/AAAA] [ID do utilizador: <UID>]`. The Coordinator extracts the UID and includes it verbatim at the top of every task routed to a specialist, ensuring all tool calls use the correct user account regardless of routing depth.
 
 ---
 

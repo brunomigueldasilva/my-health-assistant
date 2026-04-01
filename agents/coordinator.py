@@ -71,6 +71,17 @@ def create_health_team() -> Team:
             "    body fat on 20/03/2026 (same date as the previous weight question).' "
             "    Never route a bare follow-up like 'E a massa gorda?' without context.",
 
+            # ── User ID forwarding ──────────────────────────────────────────
+            "USER ID — mandatory forwarding rule:",
+            "  • Every incoming message starts with: "
+            "    [Data de hoje: DD/MM/AAAA] [ID do utilizador: <UID>]",
+            "  • You MUST extract the exact UID value and ALWAYS include this "
+            "    metadata line verbatim at the very top of every task you route "
+            "    to a specialist. Example: if UID is 29255997, start the task with:",
+            "    '[Data de hoje: 31/03/2026] [ID do utilizador: 29255997]'",
+            "  • NEVER omit the user ID when routing — specialists need it to "
+            "    call tools with the correct user account.",
+
             # ── Date format ─────────────────────────────────────────────────
             "DATE FORMAT:",
             "  • Users always write dates in European format: DD/MM/YYYY.",

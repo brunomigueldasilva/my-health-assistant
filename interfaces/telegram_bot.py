@@ -54,12 +54,14 @@ _STEP_BIRTH_DATE  = "birth_date"
 _STEP_HEIGHT      = "height"
 _STEP_WEIGHT      = "weight"
 _STEP_ACTIVITY    = "activity"
-_STEP_GOAL              = "goal"
+_STEP_GOAL              = "goal"           # kept for edit flow
+_STEP_GOALS             = "goals"          # onboarding multi-select
 _STEP_GOAL_WEIGHT       = "goal_weight"
 _STEP_GOAL_MUSCLE       = "goal_muscle"
 _STEP_GOAL_BODY_FAT     = "goal_body_fat"
 _STEP_GOAL_VISCERAL_FAT = "goal_visceral_fat"
 _STEP_ALLERGIES         = "allergies"
+_MAX_GOALS              = 3
 
 _ACTIVITY_OPTIONS = [
     ("sedentary",   "🛋️ Sedentário"),
@@ -211,6 +213,17 @@ def _goal_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
+def _goals_keyboard(selected: set) -> InlineKeyboardMarkup:
+    """Multi-select goals keyboard — toggle up to _MAX_GOALS items."""
+    rows = []
+    for key, label in _GOAL_OPTIONS:
+        prefix = "✅ " if key in selected else ""
+        rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"ob_goals_toggle:{key}")])
+    confirm_label = f"➡️ Confirmar ({len(selected)}/{_MAX_GOALS})" if selected else "➡️ Confirmar (sem objectivo)"
+    rows.append([InlineKeyboardButton(confirm_label, callback_data="ob_goals_confirm")])
+    return InlineKeyboardMarkup(rows)
+
+
 def _allergy_keyboard(selected: set) -> InlineKeyboardMarkup:
     rows = []
     for i in range(0, len(_ALLERGY_OPTIONS), 2):
@@ -322,13 +335,23 @@ def _edit_activity_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(rows)
 
 
-def _edit_goal_keyboard() -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(label, callback_data=f"edit_goal:{key}")]
-        for key, label in _GOAL_OPTIONS
-    ]
+def _edit_goals_keyboard(selected: set) -> InlineKeyboardMarkup:
+    """Multi-select goals keyboard for edit flow — toggle up to _MAX_GOALS items."""
+    rows = []
+    for key, label in _GOAL_OPTIONS:
+        prefix = "✅ " if key in selected else ""
+        rows.append([InlineKeyboardButton(f"{prefix}{label}", callback_data=f"edit_goals_toggle:{key}")])
+    confirm_label = f"➡️ Confirmar ({len(selected)}/{_MAX_GOALS})" if selected else "➡️ Confirmar (sem objectivo)"
+    rows.append([InlineKeyboardButton(confirm_label, callback_data="edit_goals_confirm")])
     rows.append([InlineKeyboardButton("◀️ Voltar", callback_data="edit_back")])
     return InlineKeyboardMarkup(rows)
+
+
+def _edit_goal_skip_cancel_keyboard(skip_cb: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏭️ Saltar", callback_data=skip_cb)],
+        [InlineKeyboardButton("❌ Cancelar", callback_data="edit_back")],
+    ])
 
 
 def _edit_cancel_keyboard() -> InlineKeyboardMarkup:
@@ -504,13 +527,91 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
     # ── ob_activity:* ─────────────────────────────────
     if data.startswith("ob_activity:") and step == _STEP_ACTIVITY:
         _onb_data(context)["activity_level"] = data.split(":", 1)[1]
-        context.user_data[_ONB_STEP] = _STEP_GOAL
+        _onb_data(context)["goals_selected"] = set()
+        context.user_data[_ONB_STEP] = _STEP_GOALS
         await query.edit_message_text(
-            "*Passo 3 de 4 — Objectivo* 🎯\n\n"
-            "Qual é o teu principal objectivo de saúde?",
-            reply_markup=_goal_keyboard(),
+            f"*Passo 3 de 4 — Objectivos* 🎯\n\n"
+            f"Quais são os teus objectivos de saúde?\n"
+            f"_(Podes seleccionar até {_MAX_GOALS})_",
+            reply_markup=_goals_keyboard(set()),
             parse_mode="Markdown",
         )
+        return
+
+    # ── ob_goals_toggle:* (multi-select) ──────────────
+    if data.startswith("ob_goals_toggle:") and step == _STEP_GOALS:
+        key      = data.split(":", 1)[1]
+        selected = _onb_data(context).get("goals_selected", set())
+        if key in selected:
+            selected.discard(key)
+        elif len(selected) < _MAX_GOALS:
+            selected.add(key)
+        else:
+            await query.answer(f"Máximo de {_MAX_GOALS} objectivos atingido.", show_alert=False)
+            return
+        _onb_data(context)["goals_selected"] = selected
+        await query.edit_message_text(
+            f"*Passo 3 de 4 — Objectivos* 🎯\n\n"
+            f"Quais são os teus objectivos de saúde?\n"
+            f"_(Podes seleccionar até {_MAX_GOALS})_",
+            reply_markup=_goals_keyboard(selected),
+            parse_mode="Markdown",
+        )
+        return
+
+    # ── ob_goals_confirm ──────────────────────────────
+    if data == "ob_goals_confirm" and step == _STEP_GOALS:
+        selected = _onb_data(context).get("goals_selected", set())
+        _TARGET_STEPS = {
+            "target_weight":       _STEP_GOAL_WEIGHT,
+            "target_muscle":       _STEP_GOAL_MUSCLE,
+            "target_body_fat":     _STEP_GOAL_BODY_FAT,
+            "target_visceral_fat": _STEP_GOAL_VISCERAL_FAT,
+        }
+        _TARGET_PROMPTS = {
+            "target_weight":       "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+            "target_muscle":       "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+            "target_body_fat":     "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+            "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+        }
+        # Split into simple goals (stored immediately) and target goals (need input)
+        simple_goals    = [_GOAL_LABEL[k] for k in selected if k not in _TARGET_STEPS]
+        pending_targets = [k for k in selected if k in _TARGET_STEPS]
+        _onb_data(context)["goals_confirmed"] = simple_goals
+        _onb_data(context)["goals_pending"]   = pending_targets
+
+        if not selected:
+            # No goals chosen — go straight to allergies
+            context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+            _onb_data(context).setdefault("allergies", set())
+            await query.edit_message_text(
+                "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+                "Tens alguma alergia ou intolerância alimentar?\n"
+                "_(Selecciona todas as que se aplicam)_",
+                reply_markup=_allergy_keyboard(set()),
+                parse_mode="Markdown",
+            )
+            return
+
+        if pending_targets:
+            next_key = pending_targets[0]
+            context.user_data[_ONB_STEP] = _TARGET_STEPS[next_key]
+            await query.edit_message_text(
+                f"*Passo 3 de 4 — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS[next_key]}",
+                reply_markup=_skip_keyboard(f"ob_goal_{next_key.replace('target_', '')}_skip"),
+                parse_mode="Markdown",
+            )
+        else:
+            # Only simple goals — go to allergies
+            context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+            _onb_data(context).setdefault("allergies", set())
+            await query.edit_message_text(
+                "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+                "Tens alguma alergia ou intolerância alimentar?\n"
+                "_(Selecciona todas as que se aplicam)_",
+                reply_markup=_allergy_keyboard(set()),
+                parse_mode="Markdown",
+            )
         return
 
     # ── ob_goal:* ─────────────────────────────────────
@@ -572,7 +673,35 @@ async def handle_onboarding_callback(update: Update, context: ContextTypes.DEFAU
         "ob_goal_visceral_fat_skip":"Atingir gordura visceral específica",
     }
     if data in _GOAL_SKIP_LABELS:
-        _onb_data(context)["goal"] = _GOAL_SKIP_LABELS[data]
+        label = _GOAL_SKIP_LABELS[data]
+        # Multi-goal flow: append to list and advance pending queue
+        if "goals_pending" in _onb_data(context):
+            _onb_data(context).setdefault("goals_confirmed", []).append(label)
+            pending = _onb_data(context).get("goals_pending", [])
+            if pending:
+                pending.pop(0)
+            if pending:
+                _TARGET_STEPS = {
+                    "target_weight": _STEP_GOAL_WEIGHT, "target_muscle": _STEP_GOAL_MUSCLE,
+                    "target_body_fat": _STEP_GOAL_BODY_FAT, "target_visceral_fat": _STEP_GOAL_VISCERAL_FAT,
+                }
+                _TARGET_PROMPTS = {
+                    "target_weight": "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+                    "target_muscle": "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+                    "target_body_fat": "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+                    "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+                }
+                next_key = pending[0]
+                context.user_data[_ONB_STEP] = _TARGET_STEPS[next_key]
+                await query.edit_message_text(
+                    f"*Passo 3 de 4 — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS[next_key]}",
+                    reply_markup=_skip_keyboard(f"ob_goal_{next_key.replace('target_', '')}_skip"),
+                    parse_mode="Markdown",
+                )
+                return
+        else:
+            # Single-goal (edit) flow
+            _onb_data(context)["goal"] = label
         context.user_data[_ONB_STEP] = _STEP_ALLERGIES
         _onb_data(context).setdefault("allergies", set())
         await query.edit_message_text(
@@ -633,7 +762,13 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
         except Exception as exc:
             logger.warning("finish_onboarding: allergy save failed: %s", exc)
 
-    if d.get("goal"):
+    for goal_str in d.get("goals_confirmed", []):
+        try:
+            add_health_goal(uid, goal_str)
+        except Exception as exc:
+            logger.warning("finish_onboarding: goal save failed (%s): %s", goal_str, exc)
+    # Backward compat: single-goal flow (edit path)
+    if not d.get("goals_confirmed") and d.get("goal"):
         try:
             add_health_goal(uid, d["goal"])
         except Exception as exc:
@@ -654,13 +789,59 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
         f"📏 Altura: {height_str}\n"
         f"⚖️ Peso: {weight_str}\n"
         f"🏃 Actividade: {activity_label}\n"
-        f"🎯 Objectivo: {d.get('goal', '—')}\n"
+        f"🎯 Objectivos: {', '.join(d.get('goals_confirmed', [])) or d.get('goal', '—')}\n"
         f"⚠️ Alergias: {allergy_str}\n\n"
         f"A tua equipa já conhece o teu perfil! Começa a conversar 💬\n"
         f"_Edita preferências a qualquer altura com_ /preferencias"
     )
     _onb_clear(context)
     await query.edit_message_text(summary, parse_mode="Markdown")
+
+
+async def _advance_pending_goals(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Pop next pending target goal and ask for its value, or transition to allergies."""
+    _TARGET_STEPS = {
+        "target_weight":       _STEP_GOAL_WEIGHT,
+        "target_muscle":       _STEP_GOAL_MUSCLE,
+        "target_body_fat":     _STEP_GOAL_BODY_FAT,
+        "target_visceral_fat": _STEP_GOAL_VISCERAL_FAT,
+    }
+    _TARGET_PROMPTS = {
+        "target_weight":       "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+        "target_muscle":       "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+        "target_body_fat":     "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+        "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+    }
+    _SKIP_KEYS = {
+        "target_weight":       "ob_goal_weight_skip",
+        "target_muscle":       "ob_goal_muscle_skip",
+        "target_body_fat":     "ob_goal_body_fat_skip",
+        "target_visceral_fat": "ob_goal_visceral_fat_skip",
+    }
+    pending = _onb_data(context).get("goals_pending", [])
+    # Remove the one we just processed (it was at the front)
+    if pending:
+        pending.pop(0)
+
+    if pending:
+        next_key = pending[0]
+        context.user_data[_ONB_STEP] = _TARGET_STEPS[next_key]
+        await update.message.reply_text(
+            f"*Passo 3 de 4 — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS[next_key]}",
+            reply_markup=_skip_keyboard(_SKIP_KEYS[next_key]),
+            parse_mode="Markdown",
+        )
+    else:
+        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
+        _onb_data(context).setdefault("allergies", set())
+        await update.message.reply_text(
+            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
+            "Tens alguma alergia ou intolerância alimentar?\n"
+            "_(Selecciona todas as que se aplicam)_",
+            reply_markup=_allergy_keyboard(set()),
+            parse_mode="Markdown",
+        )
+    return True
 
 
 # ══════════════════════════════════════════════════════
@@ -757,42 +938,24 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
             return True
-        _onb_data(context)["goal"] = f"Atingir {target:.1f} kg"
-        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
-        _onb_data(context).setdefault("allergies", set())
-        await update.message.reply_text(
-            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-            "Tens alguma alergia ou intolerância alimentar?\n"
-            "_(Selecciona todas as que se aplicam)_",
-            reply_markup=_allergy_keyboard(set()),
-            parse_mode="Markdown",
-        )
-        return True
+        _onb_data(context).setdefault("goals_confirmed", []).append(f"Atingir {target:.1f} kg")
+        return await _advance_pending_goals(update, context)
 
     if step == _STEP_GOAL_MUSCLE:
         text = update.message.text.strip().replace(",", ".")
         try:
             target = float(text)
-            if not (1 <= target <= 80):
+            if not (10 <= target <= 120):
                 raise ValueError
         except ValueError:
             await update.message.reply_text(
-                "❌ Valor inválido. Insere uma percentagem entre 1 e 80 _(ex: 40)_.\n"
+                "❌ Valor inválido. Insere um valor entre 10 e 120 kg _(ex: 65)_.\n"
                 "Ou usa o botão *Saltar* na mensagem acima.",
                 parse_mode="Markdown",
             )
             return True
-        _onb_data(context)["goal"] = f"Atingir {target:.1f}% de massa muscular"
-        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
-        _onb_data(context).setdefault("allergies", set())
-        await update.message.reply_text(
-            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-            "Tens alguma alergia ou intolerância alimentar?\n"
-            "_(Selecciona todas as que se aplicam)_",
-            reply_markup=_allergy_keyboard(set()),
-            parse_mode="Markdown",
-        )
-        return True
+        _onb_data(context).setdefault("goals_confirmed", []).append(f"Atingir {target:.1f} kg de massa muscular")
+        return await _advance_pending_goals(update, context)
 
     if step == _STEP_GOAL_BODY_FAT:
         text = update.message.text.strip().replace(",", ".")
@@ -807,17 +970,8 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
             return True
-        _onb_data(context)["goal"] = f"Atingir {target:.1f}% de gordura corporal"
-        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
-        _onb_data(context).setdefault("allergies", set())
-        await update.message.reply_text(
-            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-            "Tens alguma alergia ou intolerância alimentar?\n"
-            "_(Selecciona todas as que se aplicam)_",
-            reply_markup=_allergy_keyboard(set()),
-            parse_mode="Markdown",
-        )
-        return True
+        _onb_data(context).setdefault("goals_confirmed", []).append(f"Atingir {target:.1f}% de gordura corporal")
+        return await _advance_pending_goals(update, context)
 
     if step == _STEP_GOAL_VISCERAL_FAT:
         text = update.message.text.strip().replace(",", ".")
@@ -832,17 +986,8 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
                 parse_mode="Markdown",
             )
             return True
-        _onb_data(context)["goal"] = f"Atingir nível {target:.1f} de gordura visceral"
-        context.user_data[_ONB_STEP] = _STEP_ALLERGIES
-        _onb_data(context).setdefault("allergies", set())
-        await update.message.reply_text(
-            "*Passo 4 de 4 — Alergias e intolerâncias* ⚠️\n\n"
-            "Tens alguma alergia ou intolerância alimentar?\n"
-            "_(Selecciona todas as que se aplicam)_",
-            reply_markup=_allergy_keyboard(set()),
-            parse_mode="Markdown",
-        )
-        return True
+        _onb_data(context).setdefault("goals_confirmed", []).append(f"Atingir nível {target:.1f} de gordura visceral")
+        return await _advance_pending_goals(update, context)
 
     return False
 
@@ -1015,6 +1160,38 @@ async def cmd_editar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def _edit_finish_goals(query_or_msg, update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Clear existing goals, save newly confirmed goals, return to edit menu."""
+    uid = _uid(update)
+    confirmed = context.user_data.pop("edit_goals_confirmed", [])
+    context.user_data.pop("edit_goals_pending", None)
+    context.user_data.pop("edit_goals_selected", None)
+    context.user_data.pop(_EDIT_STEP, None)
+
+    try:
+        existing = _load_prefs_items(uid, "goals")
+        if existing:
+            _delete_prefs_by_ids([i["id"] for i in existing])
+    except Exception as exc:
+        logger.warning("_edit_finish_goals: clear failed: %s", exc)
+
+    for goal_str in confirmed:
+        try:
+            add_health_goal(uid, goal_str)
+        except Exception as exc:
+            logger.warning("_edit_finish_goals: save goal failed (%s): %s", goal_str, exc)
+
+    goals_display = ", ".join(confirmed) if confirmed else "_(nenhum)_"
+    text = (
+        f"✅ *Objectivos actualizados:* {goals_display}\n\n"
+        "✏️ *Editar perfil*\n\nQual campo queres actualizar?"
+    )
+    if hasattr(query_or_msg, "edit_message_text"):
+        await query_or_msg.edit_message_text(text, reply_markup=_edit_main_keyboard(), parse_mode="Markdown")
+    else:
+        await query_or_msg.reply_text(text, reply_markup=_edit_main_keyboard(), parse_mode="Markdown")
+
+
 async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Single handler for all edit_* callback queries."""
     query = update.callback_query
@@ -1027,6 +1204,9 @@ async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
     # ── edit_back → main menu ─────────────────────────
     if data == "edit_back":
         context.user_data.pop(_EDIT_STEP, None)
+        context.user_data.pop("edit_goals_selected", None)
+        context.user_data.pop("edit_goals_confirmed", None)
+        context.user_data.pop("edit_goals_pending", None)
         await query.edit_message_text(
             _BACK_TEXT,
             reply_markup=_edit_main_keyboard(),
@@ -1054,10 +1234,12 @@ async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
             )
         elif field == "goal":
             context.user_data.pop(_EDIT_STEP, None)
+            context.user_data["edit_goals_selected"] = set()
             await query.edit_message_text(
-                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
-                "Qual é o teu principal objectivo de saúde?",
-                reply_markup=_edit_goal_keyboard(),
+                f"✏️ *Editar perfil — Objectivos* 🎯\n\n"
+                f"Quais são os teus objectivos de saúde?\n"
+                f"_(Podes seleccionar até {_MAX_GOALS}. Os actuais serão substituídos.)_",
+                reply_markup=_edit_goals_keyboard(set()),
                 parse_mode="Markdown",
             )
         elif field == "name":
@@ -1126,58 +1308,113 @@ async def handle_edit_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         )
         return
 
-    # ── edit_goal:* ───────────────────────────────────
-    if data.startswith("edit_goal:"):
-        goal_key = data.split(":", 1)[1]
-        if goal_key == "target_weight":
-            context.user_data[_EDIT_STEP] = "goal_weight"
-            await query.edit_message_text(
-                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
-                "Qual é o teu peso alvo? _(em kg, ex: 75)_",
-                reply_markup=_edit_cancel_keyboard(),
-                parse_mode="Markdown",
-            )
+    # ── edit_goals_toggle:* ───────────────────────────
+    if data.startswith("edit_goals_toggle:"):
+        key = data.split(":", 1)[1]
+        selected = context.user_data.get("edit_goals_selected", set())
+        if key in selected:
+            selected.discard(key)
+        elif len(selected) < _MAX_GOALS:
+            selected.add(key)
+        else:
+            await query.answer(f"Máximo de {_MAX_GOALS} objectivos atingido.", show_alert=False)
             return
-        if goal_key == "target_muscle":
-            context.user_data[_EDIT_STEP] = "goal_muscle"
-            await query.edit_message_text(
-                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
-                "Qual é a tua percentagem de massa muscular alvo? _(em %, ex: 40)_",
-                reply_markup=_edit_cancel_keyboard(),
-                parse_mode="Markdown",
-            )
-            return
-        if goal_key == "target_body_fat":
-            context.user_data[_EDIT_STEP] = "goal_body_fat"
-            await query.edit_message_text(
-                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
-                "Qual é a tua percentagem de gordura corporal alvo? _(em %, ex: 15)_",
-                reply_markup=_edit_cancel_keyboard(),
-                parse_mode="Markdown",
-            )
-            return
-        if goal_key == "target_visceral_fat":
-            context.user_data[_EDIT_STEP] = "goal_visceral_fat"
-            await query.edit_message_text(
-                "✏️ *Editar perfil — Objectivo* 🎯\n\n"
-                "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
-                reply_markup=_edit_cancel_keyboard(),
-                parse_mode="Markdown",
-            )
-            return
-        goal_text = _GOAL_LABEL.get(goal_key, goal_key)
-        try:
-            update_user_profile(uid, goal=goal_text)
-            add_health_goal(uid, goal_text)
-        except Exception as exc:
-            logger.error("edit_goal: save failed for %s: %s", uid, exc)
-            await query.edit_message_text("❌ Erro ao guardar. Tenta novamente.")
-            return
+        context.user_data["edit_goals_selected"] = selected
         await query.edit_message_text(
-            f"✅ *Objectivo actualizado:* {goal_text}\n\n" + _BACK_TEXT,
-            reply_markup=_edit_main_keyboard(),
+            f"✏️ *Editar perfil — Objectivos* 🎯\n\n"
+            f"Quais são os teus objectivos de saúde?\n"
+            f"_(Podes seleccionar até {_MAX_GOALS}. Os actuais serão substituídos.)_",
+            reply_markup=_edit_goals_keyboard(selected),
             parse_mode="Markdown",
         )
+        return
+
+    # ── edit_goals_confirm ────────────────────────────
+    if data == "edit_goals_confirm":
+        selected = context.user_data.get("edit_goals_selected", set())
+        _TARGET_STEPS_EDIT = {
+            "target_weight":       "goal_weight",
+            "target_muscle":       "goal_muscle",
+            "target_body_fat":     "goal_body_fat",
+            "target_visceral_fat": "goal_visceral_fat",
+        }
+        _TARGET_PROMPTS_EDIT = {
+            "target_weight":       "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+            "target_muscle":       "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+            "target_body_fat":     "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+            "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+        }
+        _TARGET_SKIP_CBS = {
+            "target_weight":       "edit_goal_weight_skip",
+            "target_muscle":       "edit_goal_muscle_skip",
+            "target_body_fat":     "edit_goal_body_fat_skip",
+            "target_visceral_fat": "edit_goal_visceral_fat_skip",
+        }
+        simple_goals    = [_GOAL_LABEL[k] for k in selected if k not in _TARGET_STEPS_EDIT]
+        pending_targets = [k for k in selected if k in _TARGET_STEPS_EDIT]
+        context.user_data["edit_goals_confirmed"] = simple_goals
+        context.user_data["edit_goals_pending"]   = pending_targets
+        if pending_targets:
+            next_key = pending_targets[0]
+            context.user_data[_EDIT_STEP] = _TARGET_STEPS_EDIT[next_key]
+            await query.edit_message_text(
+                f"✏️ *Editar perfil — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS_EDIT[next_key]}",
+                reply_markup=_edit_goal_skip_cancel_keyboard(_TARGET_SKIP_CBS[next_key]),
+                parse_mode="Markdown",
+            )
+            return
+        await _edit_finish_goals(query, update, context)
+        return
+
+    # ── edit_goal_*_skip ──────────────────────────────
+    _EDIT_GOAL_SKIP_LABELS = {
+        "edit_goal_weight_skip":       _GOAL_LABEL["target_weight"],
+        "edit_goal_muscle_skip":       _GOAL_LABEL["target_muscle"],
+        "edit_goal_body_fat_skip":     _GOAL_LABEL["target_body_fat"],
+        "edit_goal_visceral_fat_skip": _GOAL_LABEL["target_visceral_fat"],
+    }
+    _EDIT_GOAL_SKIP_NEXT = {
+        "edit_goal_weight_skip":       "target_weight",
+        "edit_goal_muscle_skip":       "target_muscle",
+        "edit_goal_body_fat_skip":     "target_body_fat",
+        "edit_goal_visceral_fat_skip": "target_visceral_fat",
+    }
+    if data in _EDIT_GOAL_SKIP_LABELS:
+        label = _EDIT_GOAL_SKIP_LABELS[data]
+        context.user_data.setdefault("edit_goals_confirmed", []).append(label)
+        pending = context.user_data.get("edit_goals_pending", [])
+        skipped_key = _EDIT_GOAL_SKIP_NEXT[data]
+        if skipped_key in pending:
+            pending.remove(skipped_key)
+        context.user_data.pop(_EDIT_STEP, None)
+        _TARGET_STEPS_EDIT = {
+            "target_weight":       "goal_weight",
+            "target_muscle":       "goal_muscle",
+            "target_body_fat":     "goal_body_fat",
+            "target_visceral_fat": "goal_visceral_fat",
+        }
+        _TARGET_PROMPTS_EDIT = {
+            "target_weight":       "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+            "target_muscle":       "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+            "target_body_fat":     "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+            "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+        }
+        _TARGET_SKIP_CBS = {
+            "target_weight":       "edit_goal_weight_skip",
+            "target_muscle":       "edit_goal_muscle_skip",
+            "target_body_fat":     "edit_goal_body_fat_skip",
+            "target_visceral_fat": "edit_goal_visceral_fat_skip",
+        }
+        if pending:
+            next_key = pending[0]
+            context.user_data[_EDIT_STEP] = _TARGET_STEPS_EDIT[next_key]
+            await query.edit_message_text(
+                f"✏️ *Editar perfil — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS_EDIT[next_key]}",
+                reply_markup=_edit_goal_skip_cancel_keyboard(_TARGET_SKIP_CBS[next_key]),
+                parse_mode="Markdown",
+            )
+            return
+        await _edit_finish_goals(query, update, context)
         return
 
 
@@ -1256,112 +1493,58 @@ async def _handle_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await _save_and_confirm("Peso", weight_kg=weight)
         return True
 
-    if step == "goal_weight":
+    _GOAL_STEP_CONFIG = {
+        "goal_weight":       (30,  300, lambda t: f"Atingir {t:.1f} kg",                       "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 75)_."),
+        "goal_muscle":       (1,   80,  lambda t: f"Atingir {t:.1f}% de massa muscular",        "❌ Valor inválido. Insere uma percentagem entre 1 e 80 _(ex: 40)_."),
+        "goal_body_fat":     (1,   60,  lambda t: f"Atingir {t:.1f}% de gordura corporal",      "❌ Valor inválido. Insere uma percentagem entre 1 e 60 _(ex: 15)_."),
+        "goal_visceral_fat": (1,   30,  lambda t: f"Atingir nível {t:.1f} de gordura visceral", "❌ Valor inválido. Insere um nível entre 1 e 30 _(ex: 6)_."),
+    }
+    if step in _GOAL_STEP_CONFIG:
+        lo, hi, fmt, err_msg = _GOAL_STEP_CONFIG[step]
         try:
             target = float(text.replace(",", "."))
-            if not (30 <= target <= 300):
+            if not (lo <= target <= hi):
                 raise ValueError
         except ValueError:
+            await update.message.reply_text(err_msg, parse_mode="Markdown")
+            return True
+        goal_text = fmt(target)
+        context.user_data.setdefault("edit_goals_confirmed", []).append(goal_text)
+        pending = context.user_data.get("edit_goals_pending", [])
+        _TARGET_STEPS_EDIT = {
+            "target_weight":       "goal_weight",
+            "target_muscle":       "goal_muscle",
+            "target_body_fat":     "goal_body_fat",
+            "target_visceral_fat": "goal_visceral_fat",
+        }
+        _TARGET_PROMPTS_EDIT = {
+            "target_weight":       "Qual é o teu peso alvo? _(em kg, ex: 75)_",
+            "target_muscle":       "Qual é a tua massa muscular alvo? _(em kg, ex: 65)_",
+            "target_body_fat":     "Qual é a tua % de gordura corporal alvo? _(ex: 15)_",
+            "target_visceral_fat": "Qual é o teu nível de gordura visceral alvo? _(ex: 6)_",
+        }
+        _TARGET_SKIP_CBS = {
+            "target_weight":       "edit_goal_weight_skip",
+            "target_muscle":       "edit_goal_muscle_skip",
+            "target_body_fat":     "edit_goal_body_fat_skip",
+            "target_visceral_fat": "edit_goal_visceral_fat_skip",
+        }
+        # Pop the current pending target (first element matches current step)
+        step_to_key = {v: k for k, v in _TARGET_STEPS_EDIT.items()}
+        done_key = step_to_key.get(step)
+        if done_key in pending:
+            pending.remove(done_key)
+        context.user_data[_EDIT_STEP] = None
+        if pending:
+            next_key = pending[0]
+            context.user_data[_EDIT_STEP] = _TARGET_STEPS_EDIT[next_key]
             await update.message.reply_text(
-                "❌ Peso inválido. Insere um valor entre 30 e 300 kg _(ex: 75)_.",
+                f"✏️ *Editar perfil — Objectivo específico* 🎯\n\n{_TARGET_PROMPTS_EDIT[next_key]}",
+                reply_markup=_edit_goal_skip_cancel_keyboard(_TARGET_SKIP_CBS[next_key]),
                 parse_mode="Markdown",
             )
             return True
-        goal_text = f"Atingir {target:.1f} kg"
-        try:
-            update_user_profile(uid, goal=goal_text)
-            add_health_goal(uid, goal_text)
-        except Exception as exc:
-            logger.error("edit goal_weight: save failed: %s", exc)
-            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
-            return True
-        context.user_data.pop(_EDIT_STEP, None)
-        await update.message.reply_text(
-            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
-            reply_markup=_edit_main_keyboard(),
-            parse_mode="Markdown",
-        )
-        return True
-
-    if step == "goal_muscle":
-        try:
-            target = float(text.replace(",", "."))
-            if not (1 <= target <= 80):
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Valor inválido. Insere uma percentagem entre 1 e 80 _(ex: 40)_.",
-                parse_mode="Markdown",
-            )
-            return True
-        goal_text = f"Atingir {target:.1f}% de massa muscular"
-        try:
-            update_user_profile(uid, goal=goal_text)
-            add_health_goal(uid, goal_text)
-        except Exception as exc:
-            logger.error("edit goal_muscle: save failed: %s", exc)
-            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
-            return True
-        context.user_data.pop(_EDIT_STEP, None)
-        await update.message.reply_text(
-            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
-            reply_markup=_edit_main_keyboard(),
-            parse_mode="Markdown",
-        )
-        return True
-
-    if step == "goal_body_fat":
-        try:
-            target = float(text.replace(",", "."))
-            if not (1 <= target <= 60):
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Valor inválido. Insere uma percentagem entre 1 e 60 _(ex: 15)_.",
-                parse_mode="Markdown",
-            )
-            return True
-        goal_text = f"Atingir {target:.1f}% de gordura corporal"
-        try:
-            update_user_profile(uid, goal=goal_text)
-            add_health_goal(uid, goal_text)
-        except Exception as exc:
-            logger.error("edit goal_body_fat: save failed: %s", exc)
-            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
-            return True
-        context.user_data.pop(_EDIT_STEP, None)
-        await update.message.reply_text(
-            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
-            reply_markup=_edit_main_keyboard(),
-            parse_mode="Markdown",
-        )
-        return True
-
-    if step == "goal_visceral_fat":
-        try:
-            target = float(text.replace(",", "."))
-            if not (1 <= target <= 30):
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text(
-                "❌ Valor inválido. Insere um nível entre 1 e 30 _(ex: 6)_.",
-                parse_mode="Markdown",
-            )
-            return True
-        goal_text = f"Atingir nível {target:.1f} de gordura visceral"
-        try:
-            update_user_profile(uid, goal=goal_text)
-            add_health_goal(uid, goal_text)
-        except Exception as exc:
-            logger.error("edit goal_visceral_fat: save failed: %s", exc)
-            await update.message.reply_text("❌ Erro ao guardar. Tenta novamente.")
-            return True
-        context.user_data.pop(_EDIT_STEP, None)
-        await update.message.reply_text(
-            f"✅ *Objectivo actualizado:* {goal_text}\n\nQual campo queres actualizar a seguir?",
-            reply_markup=_edit_main_keyboard(),
-            parse_mode="Markdown",
-        )
+        await _edit_finish_goals(update.message, update, context)
         return True
 
     return False

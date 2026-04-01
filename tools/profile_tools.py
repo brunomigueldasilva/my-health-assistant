@@ -280,10 +280,20 @@ def add_health_goal(user_id: str | int, goal: str) -> str:
         user_id, "goals", goal,
         {"type": "health_goal", "created": datetime.now().isoformat()},
     )
+    # Update SQLite with ALL goals so agents and _compute_targets see full context
+    try:
+        data = kb.preferences.get(
+            where={"$and": [{"user_id": user_id}, {"category": "goals"}]}
+        )
+        all_goals = data.get("documents", []) if data else []
+    except Exception:
+        all_goals = [goal]
+    goals_joined = "; ".join(all_goals) if all_goals else goal
+
     conn = _get_db()
     conn.execute(
         "UPDATE user_profiles SET goal = ?, updated_at = ? WHERE user_id = ?",
-        (goal, datetime.now().isoformat(), user_id),
+        (goals_joined, datetime.now().isoformat(), user_id),
     )
     conn.commit()
     conn.close()
