@@ -223,8 +223,8 @@ When a new user sends `/start`, a guided onboarding flow is launched using inlin
  │    ├─ Step 1 — Personal data
  │    │    ├─ Gender         → 3 buttons (Male / Female / (Other / Prefer not to say))
  │    │    ├─ Date of birth  → free text input  (ex: 15/01/1990)  [skippable]
- │    │    ├─ Height         → free text input  (ex: 175)          [skippable]
- │    │    └─ Weight         → free text input  (ex: 78.5)         [skippable]
+ │    │    ├─ Height         → free text input  (ex: 175)         [skippable]
+ │    │    └─ Weight         → free text input  (ex: 78.5)        [skippable]
  │    ├─ Step 2 — Activity level  → 5 buttons (Sedentary → Very active)
  │    ├─ Step 3 — Health goals    → multi-select (up to 3 goals simultaneously)
  │    │    ├─ Perder peso / Ganhar massa muscular / Perder massa gorda
@@ -341,7 +341,16 @@ MyHealthAssistant/
 │   └── body_composition_analyst.py   # Body Composition Analyst agent (Tanita)
 ├── interfaces/
 │   ├── telegram_bot.py               # Telegram interface + onboarding flow
-│   └── gradio_app.py                 # Gradio Web UI (5 tabs incl. Objectivo dashboard)
+│   └── gradio/                       # Gradio Web UI
+│       ├── app.py                    # Entry point — Blocks layout + all event handlers
+│       ├── shared.py                 # Shared utilities (agent team, session mgmt, DB helpers)
+│       ├── styles.py                 # CSS styles
+│       └── tabs/                     # One module per tab
+│           ├── chat_tab.py           # 💬 Conversa
+│           ├── profile_tab.py        # 👤 Perfil
+│           ├── goals_tab.py          # 🎯 Objectivo dashboard
+│           ├── nutrition_tab.py      # 🥗 Nutrição e Gostos
+│           └── admin_tab.py          # ⚙️ Administração
 ├── knowledge/
 │   ├── __init__.py                   # KnowledgeBase class — ChromaDB wrapper
 │   └── seed_data.py                  # Initial seed data (nutrition + exercises)

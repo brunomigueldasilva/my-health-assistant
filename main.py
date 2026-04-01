@@ -54,7 +54,7 @@ from config import (
 from knowledge import get_knowledge_base
 from knowledge.seed_data import seed_all
 from interfaces.telegram_bot import create_telegram_app
-from interfaces.gradio_app import demo as gradio_demo, _CSS as gradio_css
+from interfaces.gradio.app import demo as gradio_demo, _CSS as gradio_css
 
 # ── Logging constants ───────────────────────────────────
 _LOG_DIR = Path("logs")
