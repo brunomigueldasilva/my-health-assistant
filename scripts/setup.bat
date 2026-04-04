@@ -139,15 +139,19 @@ if "!LLM_PROVIDER!"=="" (
 
 :: Check SECRET_KEY
 set SECRET_KEY=
-for /f "tokens=2 delims==" %%a in ('findstr /i "^SECRET_KEY" .env 2^>nul') do set SECRET_KEY=%%a
+for /f "tokens=1* delims==" %%a in ('findstr /i "^SECRET_KEY" .env 2^>nul') do set SECRET_KEY=%%b
 set SECRET_KEY=!SECRET_KEY: =!
 
 if "!SECRET_KEY!"=="" (
-    echo [WARN] Missing: SECRET_KEY
-    set MISSING_KEY=1
+    echo [INFO] SECRET_KEY not set - generating one automatically...
+    for /f "tokens=*" %%k in ('python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"') do set NEW_KEY=%%k
+    echo SECRET_KEY=!NEW_KEY!>> .env
+    echo [OK] SECRET_KEY generated and added to .env.
 ) else if "!SECRET_KEY!"=="your_fernet_key_here" (
-    echo [WARN] Missing: SECRET_KEY ^(still set to placeholder^)
-    set MISSING_KEY=1
+    echo [INFO] SECRET_KEY is placeholder - generating one automatically...
+    for /f "tokens=*" %%k in ('python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"') do set NEW_KEY=%%k
+    python -c "content=open('.env').read(); open('.env','w').write(content.replace('SECRET_KEY=your_fernet_key_here','SECRET_KEY=!NEW_KEY!'))"
+    echo [OK] SECRET_KEY generated and replaced in .env.
 ) else (
     echo [OK] SECRET_KEY is set.
 )
@@ -157,7 +161,7 @@ echo.
 echo [8/8] Checking Telegram bot token...
 
 set TG_STATUS=missing
-for /f "tokens=*" %%r in ('python -c "import sys; sys.path.insert(0,'.'); from tools.credential_store import get_telegram_token; print('ok' if get_telegram_token() else 'missing')" 2^>nul') do set TG_STATUS=%%r
+for /f "tokens=*" %%r in ('python scripts\check_telegram.py 2^>nul') do set TG_STATUS=%%r
 
 if "!TG_STATUS!"=="ok" (
     echo [OK] Telegram bot token already configured in the credential store.
@@ -180,19 +184,11 @@ echo.
 
 set STEP=1
 
-if !MISSING_LLM! equ 1 (
-    echo  !STEP!. Set your LLM provider in .env ^(see README step 2^):
-    echo       LLM_PROVIDER=ollama   # or gemini / openai / anthropic / lmstudio
-    echo.
-    set /a STEP+=1
-)
+echo  !STEP!. Confirm your LLM provider in .env:
+echo       LLM_PROVIDER=ollama   # or gemini / openai / anthropic / lmstudio
+echo.
+set /a STEP+=1
 
-if !MISSING_KEY! equ 1 (
-    echo  !STEP!. Generate the encryption key and add it to .env as SECRET_KEY:
-    echo       python -c "from cryptography.fernet import Fernet; print^(Fernet.generate_key^(^).decode^(^)^)"
-    echo.
-    set /a STEP+=1
-)
 
 if "!TG_STATUS!" neq "ok" (
     echo  !STEP!. Save the Telegram bot token ^(required before starting^):
