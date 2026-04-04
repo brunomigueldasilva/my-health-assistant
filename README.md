@@ -65,7 +65,7 @@ bash scripts/setup.sh
 scripts\setup.bat
 ```
 
-Creates the virtual environment, installs dependencies, installs Playwright and copies `.env.example` → `.env`.
+Creates the virtual environment, installs dependencies, installs Playwright, copies `.env.example` → `.env`, and auto-generates `SECRET_KEY`.
 
 > If `.env` already exists the script keeps it — no values are overwritten.
 
@@ -165,21 +165,7 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 
 ---
 
-### 3. Generate the encryption key
-
-```bash
-# Activate the virtual environment first:
-source .venv/bin/activate     # macOS / Linux
-.venv\Scripts\activate        # Windows
-
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
-```
-
-Paste the output into `.env` as `SECRET_KEY`. This key encrypts all credentials stored in the database (Telegram token, Tanita passwords, Garmin tokens).
-
----
-
-### 4. Save the Telegram bot token
+### 3. Save the Telegram bot token
 
 > ⚠️ Required **before** starting — the assistant will not launch without a configured token.
 
@@ -199,7 +185,7 @@ The script prompts for the token from [@BotFather](https://t.me/BotFather) and s
 
 ---
 
-### 5. Start the assistant
+### 4. Start the assistant
 
 ```bash
 python main.py
@@ -210,7 +196,7 @@ On first run the knowledge base is automatically seeded with nutritional and exe
 
 ---
 
-### 6. Onboarding
+### 5. Onboarding
 
 Choose your preferred interface:
 
@@ -234,7 +220,7 @@ Choose your preferred interface:
 
 ---
 
-### 7. Optional integrations
+### 6. Optional integrations
 
 Configure after creating your profile — your `user_id` is shown with `/profile` in Telegram.
 
