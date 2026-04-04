@@ -201,14 +201,17 @@ graph LR
         UP2["user_preferences\n(goals · allergies · likes · dislikes)"]
     end
 
-    PT["Profile Tools"] --> UP & WH
+    PT["Profile Tools"] --> UP
+    PT --> WH
     PT --> UP2
     TT["Tanita Tools"] --> BC
     AG["Agno Framework"] --> SS
     NT["Nutrition Tools"] --> NK
     ET["Exercise Tools"] --> EK
 
-    GR["Gradio Dashboard"] -.->|read KPIs + charts| UP & WH & BC
+    GR["Gradio Dashboard"] -.->|read KPIs + charts| UP
+    GR -.->|read KPIs + charts| WH
+    GR -.->|read KPIs + charts| BC
     GR -.->|read goals for target inference| UP2
 ```
 

@@ -229,6 +229,7 @@ Configure after creating your profile — your `user_id` is shown with `/profile
 ```bash
 python scripts/setup_credentials.py
 # → choose "tanita" → enter your MyTanita email and password
+# (your user_id is the numeric Telegram ID shown with /profile)
 ```
 
 Then ask the assistant: *"Sync my Tanita measurements"*
@@ -301,6 +302,7 @@ MyHealthAssistant/
 │   ├── setup.sh / setup.bat          # Dependency installation
 │   ├── setup_telegram.py             # Save Telegram token encrypted (required, once)
 │   ├── setup_credentials.py          # Tanita credentials
+│   ├── check_telegram.py             # Check if Telegram token is configured (used by setup scripts)
 │   └── garmin_browser_auth.py        # Garmin OAuth browser flow
 ├── config/
 │   └── __init__.py                   # Configuration constants + LLM model factory
