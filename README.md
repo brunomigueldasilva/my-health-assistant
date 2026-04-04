@@ -55,6 +55,8 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 
 ### 1. Install dependencies
 
+> Run the following commands from the **root of the project folder** (where `main.py` is located).
+
 ```bash
 # macOS / Linux
 bash scripts/setup.sh
@@ -166,6 +168,10 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 ### 3. Generate the encryption key
 
 ```bash
+# Activate the virtual environment first:
+source .venv/bin/activate     # macOS / Linux
+.venv\Scripts\activate        # Windows
+
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 

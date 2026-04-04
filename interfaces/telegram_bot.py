@@ -427,7 +427,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🥗 *Nutricionista*\n"
         f"🏋️ *Personal Trainer*\n"
         f"👨‍🍳 *Chef*\n"
-        f"📊 *Analista de Composição Corporal*\n\n"
+        f"📊 *Analista de Composição Corporal*\n"
+        f"🏃 *Analista de Atividade*\n\n"
         f"Para receber conselhos personalizados, preciso de conhecer-te melhor.\n"
         f"São apenas *4 passos rápidos* — menos de 1 minuto! ⚡",
         reply_markup=keyboard,
