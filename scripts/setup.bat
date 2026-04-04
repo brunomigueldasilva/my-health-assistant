@@ -1,6 +1,6 @@
 @echo off
 :: ──────────────────────────────────────────────────────────────────────────────
-:: MyHealthAssistant — Setup script (Windows)
+:: MyHealthAssistant - Setup script (Windows)
 :: Usage: scripts\setup.bat   (from the project root)
 ::        OR:  cd scripts && setup.bat
 :: ──────────────────────────────────────────────────────────────────────────────
@@ -13,13 +13,13 @@ set VENV_DIR=.venv
 set MISSING_KEYS=
 
 echo.
-echo ╔══════════════════════════════════════════════════╗
-echo ║      MyHealthAssistant — Setup                   ║
-echo ╚══════════════════════════════════════════════════╝
+echo +--------------------------------------------------+
+echo ^|      MyHealthAssistant - Setup                   ^|
+echo +--------------------------------------------------+
 echo.
 
 :: ── 1. Check Python ──────────────────────────────────────────────────────────
-echo [1/7] Checking Python version...
+echo [1/8] Checking Python version...
 
 set PYTHON_BIN=
 for %%p in (python3.13 python3.12 python3.11 python3 python) do (
@@ -51,10 +51,10 @@ if "!PYTHON_BIN!"=="" (
 
 :: ── 2. Create virtual environment ────────────────────────────────────────────
 echo.
-echo [2/7] Creating virtual environment (%VENV_DIR%)...
+echo [2/8] Creating virtual environment (%VENV_DIR%)...
 
 if exist "%VENV_DIR%\Scripts\activate.bat" (
-    echo [!]  Virtual environment already exists — skipping creation.
+    echo [OK] Virtual environment already exists - skipping creation.
 ) else (
     !PYTHON_BIN! -m venv %VENV_DIR%
     if !errorlevel! neq 0 (
@@ -71,13 +71,13 @@ echo [OK] Virtual environment activated.
 
 :: ── 4. Upgrade pip ───────────────────────────────────────────────────────────
 echo.
-echo [3/7] Upgrading pip...
-python -m pip install --upgrade pip --quiet
+echo [3/8] Upgrading pip...
+python -m pip install --upgrade pip
 echo [OK] pip upgraded.
 
 :: ── 5. Install dependencies ──────────────────────────────────────────────────
 echo.
-echo [4/7] Installing Python dependencies...
+echo [4/8] Installing Python dependencies...
 
 if not exist "requirements.txt" (
     echo [ERROR] requirements.txt not found.
@@ -86,7 +86,7 @@ if not exist "requirements.txt" (
     exit /b 1
 )
 
-pip install -r requirements.txt --quiet
+pip install -r requirements.txt
 if !errorlevel! neq 0 (
     echo [ERROR] Failed to install dependencies. Check the output above.
     pause
@@ -96,22 +96,22 @@ echo [OK] Dependencies installed.
 
 :: ── 6. Install Playwright browsers ───────────────────────────────────────────
 echo.
-echo [5/7] Installing Playwright ^(Chromium^)...
+echo [5/8] Installing Playwright ^(Chromium^)...
 playwright install chromium
 echo [OK] Playwright Chromium installed.
 
 :: ── 7. Copy .env ─────────────────────────────────────────────────────────────
 echo.
-echo [6/7] Configuring environment...
+echo [6/8] Configuring environment...
 
 if exist ".env" (
-    echo [!]  .env already exists — keeping existing file.
+    echo [OK] .env already exists - keeping existing file.
 ) else (
     if exist ".env.example" (
         copy ".env.example" ".env" >nul
         echo [OK] .env created from .env.example.
     ) else (
-        echo [!]  .env.example not found — skipping .env creation.
+        echo [WARN] .env.example not found - skipping .env creation.
     )
 )
 
@@ -128,10 +128,10 @@ for /f "tokens=2 delims==" %%a in ('findstr /i "^LLM_PROVIDER" .env 2^>nul') do 
 set LLM_PROVIDER=!LLM_PROVIDER: =!
 
 if "!LLM_PROVIDER!"=="" (
-    echo [!]  Missing: LLM_PROVIDER
+    echo [WARN] Missing: LLM_PROVIDER
     set MISSING_LLM=1
 ) else if "!LLM_PROVIDER!"=="your_provider" (
-    echo [!]  Missing: LLM_PROVIDER ^(still set to placeholder^)
+    echo [WARN] Missing: LLM_PROVIDER ^(still set to placeholder^)
     set MISSING_LLM=1
 ) else (
     echo [OK] LLM_PROVIDER = !LLM_PROVIDER!
@@ -143,10 +143,10 @@ for /f "tokens=2 delims==" %%a in ('findstr /i "^SECRET_KEY" .env 2^>nul') do se
 set SECRET_KEY=!SECRET_KEY: =!
 
 if "!SECRET_KEY!"=="" (
-    echo [!]  Missing: SECRET_KEY
+    echo [WARN] Missing: SECRET_KEY
     set MISSING_KEY=1
 ) else if "!SECRET_KEY!"=="your_fernet_key_here" (
-    echo [!]  Missing: SECRET_KEY ^(still set to placeholder^)
+    echo [WARN] Missing: SECRET_KEY ^(still set to placeholder^)
     set MISSING_KEY=1
 ) else (
     echo [OK] SECRET_KEY is set.
@@ -162,17 +162,20 @@ for /f "tokens=*" %%r in ('python -c "import sys; sys.path.insert(0,'.'); from t
 if "!TG_STATUS!"=="ok" (
     echo [OK] Telegram bot token already configured in the credential store.
 ) else (
-    echo [!]  Telegram bot token not yet configured.
+    echo [WARN] Telegram bot token not yet configured.
 )
 
 :: ── Done ─────────────────────────────────────────────────────────────────────
 echo.
-echo ════════════════════════════════════════════════════
+echo ==================================================
 echo  Setup complete!
-echo ════════════════════════════════════════════════════
+echo ==================================================
 echo.
-echo  Next steps:
-echo    %VENV_DIR%\Scripts\activate.bat
+echo  Next steps - activate the virtual environment:
+echo    CMD:        .venv\Scripts\activate.bat
+echo    PowerShell: .venv\Scripts\Activate.ps1
+echo.
+echo  NOTE: .venv is in the project root, not in scripts\
 echo.
 
 set STEP=1
