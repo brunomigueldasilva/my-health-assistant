@@ -136,22 +136,6 @@ if "!LLM_PROVIDER!"=="" (
     echo [OK] LLM_PROVIDER = !LLM_PROVIDER!
 )
 
-:: Check TELEGRAM_BOT_TOKEN
-set TG_TOKEN=
-for /f "tokens=2 delims==" %%a in ('findstr /i "^TELEGRAM_BOT_TOKEN" .env 2^>nul') do set TG_TOKEN=%%a
-set TG_TOKEN=!TG_TOKEN: =!
-
-if "!TG_TOKEN!"=="" (
-    echo [!]  Missing: TELEGRAM_BOT_TOKEN
-    set /a MISSING_COUNT+=1
-) else if "!TG_TOKEN!"=="your_telegram_bot_token" (
-    echo [!]  Missing: TELEGRAM_BOT_TOKEN ^(still set to placeholder^)
-    set /a MISSING_COUNT+=1
-) else (
-    set PREVIEW=!TG_TOKEN:~0,10!
-    echo [OK] TELEGRAM_BOT_TOKEN = !PREVIEW!...
-)
-
 echo.
 if !MISSING_COUNT! gtr 0 (
     echo [!]  Some values in .env need to be filled in before running.
@@ -161,18 +145,53 @@ if !MISSING_COUNT! gtr 0 (
     echo [OK] All required .env values are set.
 )
 
+:: ── 8. Telegram bot token ─────────────────────────────────────────────────────
+echo.
+echo [8/8] Verificando token do bot Telegram...
+
+set TG_STATUS=missing
+for /f "tokens=*" %%r in ('python -c "import sys; sys.path.insert(0,'.'); from tools.credential_store import get_telegram_token; t=get_telegram_token(); print('ok' if t else 'missing')" 2^>nul') do set TG_STATUS=%%r
+
+if "!TG_STATUS!"=="ok" (
+    echo [OK] Token do Telegram ja configurado no credential store.
+) else (
+    echo [!]  Token do Telegram ainda nao configurado.
+    echo      Obtem o token no @BotFather do Telegram e executa:
+    echo        python scripts\setup_telegram.py
+)
+
 :: ── Done ─────────────────────────────────────────────────────────────────────
 echo.
 echo ════════════════════════════════════════════════════
-echo  Setup complete!
+echo  Setup completo!
 echo ════════════════════════════════════════════════════
 echo.
-echo  To start the assistant:
+echo  Proximos passos:
 echo    %VENV_DIR%\Scripts\activate.bat
-echo    python main.py
 echo.
-echo  Interfaces:
-echo    - Telegram Bot  : search for your bot in Telegram
-echo    - Gradio Web UI : http://localhost:7860
+if "!TG_STATUS!" neq "ok" (
+    echo  1. Guarda o token do bot Telegram ^(necessario antes de iniciar^):
+    echo       python scripts\setup_telegram.py
+    echo.
+    echo  2. Inicia o assistente:
+    echo       python main.py
+    echo.
+    echo  3. Envia /start ao teu bot no Telegram para criar o perfil
+    echo.
+    echo  4. Servicos opcionais ^(apos criar o perfil^):
+    echo       Tanita : python scripts\setup_credentials.py
+    echo       Garmin : python scripts\garmin_browser_auth.py --user ^<id^>
+) else (
+    echo  1. Inicia o assistente:
+    echo       python main.py
+    echo.
+    echo  2. Envia /start ao teu bot no Telegram para criar o perfil
+    echo.
+    echo  3. Servicos opcionais ^(apos criar o perfil^):
+    echo       Tanita : python scripts\setup_credentials.py
+    echo       Garmin : python scripts\garmin_browser_auth.py --user ^<id^>
+)
+echo.
+echo  Interface web: http://localhost:7860
 echo.
 pause

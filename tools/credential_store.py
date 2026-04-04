@@ -154,3 +154,34 @@ def list_services(user_id: str) -> list[str]:
     ).fetchall()
     conn.close()
     return [r["service"] for r in rows]
+
+
+# ── Telegram bot token (app-level credential) ──────────────────────────────────
+
+# Special system-level user that holds app-wide credentials (e.g. the bot token).
+_SYSTEM_USER = "_system_"
+
+
+def set_telegram_token(token: str) -> None:
+    """Store the Telegram bot token in the encrypted credential store.
+
+    The token is associated with the reserved user ``_system_`` under the
+    service ``"telegram"`` so it follows the same encryption and storage
+    pattern as per-user Tanita/Garmin credentials.
+    """
+    set_credential(_SYSTEM_USER, "telegram", "bot", token)
+    logger.info("Telegram bot token stored in credential store.")
+
+
+def get_telegram_token() -> str | None:
+    """Return the Telegram bot token.
+
+    Lookup order:
+    1. Encrypted credential store (``_system_`` / ``"telegram"``).
+    2. ``TELEGRAM_BOT_TOKEN`` environment variable (legacy / backward compat).
+    """
+    import os
+    cred = get_credential(_SYSTEM_USER, "telegram")
+    if cred:
+        return cred[1]  # password field holds the token
+    return os.getenv("TELEGRAM_BOT_TOKEN")

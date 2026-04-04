@@ -135,14 +135,6 @@ else
     esac
 fi
 
-# TELEGRAM_BOT_TOKEN
-token=$(grep -E "^TELEGRAM_BOT_TOKEN\s*=" .env 2>/dev/null | cut -d= -f2 | tr -d ' "' || true)
-if [ -z "$token" ] || [ "$token" = "your_telegram_bot_token" ]; then
-    missing+=("TELEGRAM_BOT_TOKEN")
-else
-    ok "TELEGRAM_BOT_TOKEN = ${token:0:10}..."
-fi
-
 if [ ${#missing[@]} -gt 0 ]; then
     warn "The following values must be set in .env before running:"
     for k in "${missing[@]}"; do
@@ -154,14 +146,58 @@ else
     ok "All required .env values are set."
 fi
 
+# ── 8. Telegram bot token ─────────────────────────────────────────────────────
+step "8. Configurando token do bot Telegram..."
+
+# Check if token already stored in credential store
+token_stored=$("$VENV_DIR/bin/python" -c "
+import sys; sys.path.insert(0, '.')
+try:
+    from tools.credential_store import get_telegram_token
+    t = get_telegram_token()
+    print('ok' if t else 'missing')
+except Exception as e:
+    print('missing')
+" 2>/dev/null || echo "missing")
+
+if [ "$token_stored" = "ok" ]; then
+    ok "Token do Telegram já configurado no credential store."
+else
+    warn "Token do Telegram ainda não configurado."
+    echo ""
+    info "Obtém o token no @BotFather do Telegram e executa:"
+    echo -e "  ${BOLD}source $VENV_DIR/bin/activate && python scripts/setup_telegram.py${NC}"
+    echo ""
+fi
+
 # ── 9. Done ───────────────────────────────────────────────────────────────────
-echo -e "\n${GREEN}${BOLD}Setup complete!${NC}"
+echo -e "\n${GREEN}${BOLD}Setup completo!${NC}"
 echo ""
-echo -e "To start the assistant:"
+echo -e "${BOLD}Passos seguintes:${NC}"
 echo -e "  ${BOLD}source $VENV_DIR/bin/activate${NC}"
-echo -e "  ${BOLD}python main.py${NC}"
 echo ""
-echo -e "Interfaces:"
-echo -e "  • Telegram Bot  — search for your bot in Telegram"
-echo -e "  • Gradio Web UI — http://localhost:7860"
+if [ "$token_stored" != "ok" ]; then
+    echo -e "  ${YELLOW}1.${NC} Guarda o token do bot Telegram (necessário antes de iniciar):"
+    echo -e "     ${BOLD}python scripts/setup_telegram.py${NC}"
+    echo ""
+    echo -e "  ${YELLOW}2.${NC} Inicia o assistente:"
+    echo -e "     ${BOLD}python main.py${NC}"
+    echo ""
+    echo -e "  ${YELLOW}3.${NC} Envia ${BOLD}/start${NC} ao teu bot no Telegram para criar o perfil"
+    echo ""
+    echo -e "  ${YELLOW}4.${NC} Configura serviços opcionais (após criar o perfil):"
+    echo -e "     Tanita:  ${BOLD}python scripts/setup_credentials.py${NC}"
+    echo -e "     Garmin:  ${BOLD}python scripts/garmin_browser_auth.py --user <id>${NC}"
+else
+    echo -e "  ${YELLOW}1.${NC} Inicia o assistente:"
+    echo -e "     ${BOLD}python main.py${NC}"
+    echo ""
+    echo -e "  ${YELLOW}2.${NC} Envia ${BOLD}/start${NC} ao teu bot no Telegram para criar o perfil"
+    echo ""
+    echo -e "  ${YELLOW}3.${NC} Configura serviços opcionais (após criar o perfil):"
+    echo -e "     Tanita:  ${BOLD}python scripts/setup_credentials.py${NC}"
+    echo -e "     Garmin:  ${BOLD}python scripts/garmin_browser_auth.py --user <id>${NC}"
+fi
+echo ""
+echo -e "Interface web: ${BOLD}http://localhost:7860${NC}"
 echo ""

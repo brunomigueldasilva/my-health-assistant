@@ -41,19 +41,19 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 
 ---
 
-## ⚙️ Prerequisites
+## 🚀 Getting Started
+
+### Prerequisites
 
 - Python 3.11+
-- A Telegram account (Bot Token via [@BotFather](https://t.me/BotFather))
-- One of the supported LLM providers (see below)
+- A Telegram account + bot token (via [@BotFather](https://t.me/BotFather))
+- One of the supported LLM providers (Ollama is free and local)
 - *(Optional)* A [MyTanita](https://mytanita.eu) account for body composition sync
 - *(Optional)* A [Garmin Connect](https://connect.garmin.com) account for activity and sleep data
 
 ---
 
-## 🚀 Setup
-
-### Quick start (recommended)
+### 1. Install dependencies
 
 ```bash
 # macOS / Linux
@@ -63,18 +63,18 @@ bash scripts/setup.sh
 scripts\setup.bat
 ```
 
-The setup script will: check your Python version, create a virtual environment, install all dependencies, install Playwright, copy `.env.example` → `.env`, and validate your configuration.
+Creates the virtual environment, installs dependencies, installs Playwright and copies `.env.example` → `.env`.
 
 ---
 
-### Manual setup
-
-#### 1. Choose your LLM provider
+### 2. Choose your LLM provider
 
 > 💡 **Recommended local model: `qwen2.5:32b`** (Ollama or LM Studio)
 > Best-performing model for this project — reliable tool calling and consistent agent routing.
 > Requires a GPU with at least 32 GB VRAM (e.g. NVIDIA RTX 5090).
 > On 24 GB VRAM (e.g. RTX 4090) the model loads but may produce slower or inconsistent responses.
+
+Edit `.env` and set `LLM_PROVIDER` and the matching key:
 
 <details>
 <summary>🖥️ <b>Option A — Ollama (local, free)</b></summary>
@@ -161,224 +161,153 @@ ANTHROPIC_MODEL=claude-sonnet-4-6
 
 ---
 
-#### 2. Create a Telegram Bot
-
-1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
-2. Send `/newbot` and follow the instructions
-3. Copy the **Bot Token**
-
----
-
-#### 3. Install dependencies
-
-```bash
-python -m venv .venv
-
-# Windows
-.venv\Scripts\activate
-
-# macOS / Linux
-source .venv/bin/activate
-
-pip install -r requirements.txt
-
-# Required for Tanita sync and Garmin browser authentication
-playwright install chromium
-```
-
----
-
-#### 4. Configure
-
-```bash
-cp .env.example .env
-```
-
-Edit `.env` and set at minimum:
-- `LLM_PROVIDER` — which provider to use
-- The matching API key / model (see step 1)
-- `TELEGRAM_BOT_TOKEN` — from @BotFather
-- `SECRET_KEY` — Fernet encryption key for the credential store (see step 5)
-
----
-
-#### 5. Set up the encryption key and credentials
-
-**Generate the encryption key** (run once — paste the output into `.env` as `SECRET_KEY`):
+### 3. Generate the encryption key
 
 ```bash
 python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
 
-**Add Tanita credentials** for a user (interactive):
-
-```bash
-python scripts/setup_credentials.py
-# → choose service: tanita
-# → enter user ID, email and password
-```
-
-Or from a Python shell:
-
-```python
-from tools.credential_store import set_credential
-set_credential("<user_id>", "tanita", "email@mytanita.eu", "password")
-```
-
-**Add Garmin credentials / run browser authentication:**
-
-Garmin Connect's SSO blocks programmatic login. A one-time browser flow is required per user to obtain long-lived OAuth tokens (~6 months):
-
-```bash
-python scripts/garmin_browser_auth.py --user <user_id>
-```
-
-This opens a Chromium window — log in with your Garmin account. Tokens are saved to `data/garmin_tokens/<user_id>/` and reused automatically. **No password is stored after the flow completes.**
-
-> `<user_id>` is the Telegram numeric user ID (or any custom identifier you use in the Gradio UI).
+Paste the output into `.env` as `SECRET_KEY`. This key encrypts all credentials stored in the database (Telegram token, Tanita passwords, Garmin tokens).
 
 ---
 
-#### 6. Run
+### 4. Save the Telegram bot token
+
+> ⚠️ Required **before** starting — the assistant will not launch without a configured token.
+
+1. Open Telegram and search for [@BotFather](https://t.me/BotFather)
+2. Send `/newbot` and follow the instructions
+3. Copy the **Bot Token**
+
+```bash
+# Activate the virtual environment first:
+source .venv/bin/activate     # macOS / Linux
+.venv\Scripts\activate        # Windows
+
+python scripts/setup_telegram.py
+```
+
+The script prompts for the token from [@BotFather](https://t.me/BotFather) and stores it **encrypted** in the SQLite database — never as plain text in `.env`.
+
+---
+
+### 5. Start the assistant
 
 ```bash
 python main.py
 ```
 
-Starts both the **Telegram Bot** and the **Gradio Web UI** at `http://localhost:7860`.
+Starts the **Telegram Bot** and the **Gradio Web UI** at `http://localhost:7860`.
 On first run the knowledge base is automatically seeded with nutritional and exercise data.
 
 ---
 
-## 📱 Telegram
+### 6. Onboarding
 
-### Onboarding
+Choose your preferred interface:
 
-When a new user sends `/start`, a guided onboarding flow is launched using inline keyboards — no manual typing required for structured choices:
+#### Via Telegram
 
+1. Open Telegram and search for your bot by name
+2. Send `/start`
+3. Follow the guided wizard (~1 minute):
+   - Personal data (gender, date of birth, height, weight)
+   - Activity level
+   - Health goals (lose weight, gain muscle, etc.)
+   - Food allergies
+
+#### Via Gradio (browser)
+
+1. Open `http://localhost:7860`
+2. Click **➕ Create new account** in the sidebar
+3. Follow the same wizard steps in the browser
+
+> The **User ID** is shared across both interfaces. Use your Telegram numeric ID in the Gradio UI to access the same profile.
+
+---
+
+### 7. Optional integrations
+
+Configure after creating your profile — your `user_id` is shown with `/profile` in Telegram.
+
+#### Tanita — body composition
+
+```bash
+python scripts/setup_credentials.py
+# → choose "tanita" → enter your MyTanita email and password
 ```
-/start
- ├─ New user → interactive onboarding (~1 minute)
- │    ├─ Step 1 — Personal data
- │    │    ├─ Gender         → 3 buttons (Male / Female / (Other / Prefer not to say))
- │    │    ├─ Date of birth  → free text input  (ex: 15/01/1990)  [skippable]
- │    │    ├─ Height         → free text input  (ex: 175)         [skippable]
- │    │    └─ Weight         → free text input  (ex: 78.5)        [skippable]
- │    ├─ Step 2 — Activity level  → 5 buttons (Sedentary → Very active)
- │    ├─ Step 3 — Health goals    → multi-select (up to 3 goals simultaneously)
- │    │    ├─ Lose weight / Gain muscle mass / Lose body fat
- │    │    ├─ Lose visceral fat / Maintain weight / Improve fitness
- │    │    ├─ Improve overall health / Better eating habits
- │    │    ├─ Get abs
- │    │    └─ Target goals → extra text input for the specific target value [skippable]:
- │    │         ├─ Reach specific weight           (e.g. 75 kg)
- │    │         ├─ Reach specific muscle mass      (e.g. 65 kg or 60%)
- │    │         ├─ Reach specific body fat         (e.g. 15%)
- │    │         └─ Reach specific visceral fat     (e.g. 6)
- │    └─ Step 4 — Allergies  → 6 multi-select toggle buttons + "None" + Confirm
- │         (Gluten · Lactose · Tree nuts · Shellfish · Eggs · Peanuts)
- │         → Profile summary shown on completion
- │
- └─ Returning user → welcome-back message (onboarding skipped)
+
+Then ask the assistant: *"Sync my Tanita measurements"*
+
+#### Garmin Connect — activity and sleep
+
+```bash
+python scripts/garmin_browser_auth.py --user <user_id>
 ```
 
-After onboarding the assistant immediately uses the profile to personalise all advice.
-Edit preferences at any time with `/preferences`.
+Opens a Chromium window — log in with your Garmin account. OAuth tokens (~6 months validity) are saved to `data/garmin_tokens/<user_id>/`. **No password is stored after the flow completes.**
 
-### 💬 Conversational examples
+Then ask: *"How many steps did I take this week?"* or *"How was my sleep last night?"*
 
-- **Nutrition**: "Give me a meal plan to lose visceral fat"
-- **Workout**: "Suggest a 30-minute HIIT workout"
-- **Recipes**: "Give me a healthy recipe with chicken and broccoli"
-- **Body composition**: "Sync my Tanita measurements"
-- **Activity**: "How many steps did I take this week?" / "How was my sleep last night?"
-- **Goals**: "I want to reach 75 kg in 3 months"
-- **Preferences**: "I don't like beetroot or liver"
+---
 
-### 📋 Commands
+## 💬 What you can ask
+
+| Area | Examples |
+|---|---|
+| **Nutrition** | "Give me a meal plan to lose visceral fat" |
+| **Workout** | "Suggest a 30-minute HIIT workout" |
+| **Recipes** | "Give me a healthy recipe with chicken and broccoli" |
+| **Body composition** | "Sync my Tanita measurements" / "What was my body fat in March?" |
+| **Activity** | "How many steps did I take this week?" / "How was my sleep last night?" |
+| **Goals** | "I want to reach 75 kg in 3 months" |
+| **Preferences** | "I don't like beetroot or liver" |
+
+---
+
+## 📋 Telegram Commands
 
 | Command | Description |
 |---|---|
-| `/start` | Welcome message — launches onboarding for new users |
-| `/profile` | View current profile summary |
-| `/edit` | Edit profile fields (name, birth date, gender, height, weight, activity level, goal) |
-| `/preferences` | Manage food likes/dislikes, allergies, dietary restrictions and health goals |
+| `/start` | Launch onboarding (new users) |
+| `/profile` | View profile summary |
+| `/edit` | Edit profile fields |
+| `/preferences` | Manage food likes/dislikes, allergies, restrictions |
 | `/weight <kg>` | Log current weight |
-| `/history` | View weight history and trend |
-| `/reset` | Clear conversation history (new session) |
-| `/help` | Show available commands |
+| `/history` | View weight history |
+| `/reset` | Start a new conversation session |
+| `/help` | List available commands |
 
 ---
 
-## 🌐 Gradio Web UI
-
-A full web interface with **7 tabs**:
+## 🌐 Gradio Web UI Tabs
 
 | Tab | Description |
 |---|---|
-| 🚀 **Onboarding** | Step-by-step new-user wizard (shown only when no account is selected) |
-| 👤 **Profile** | Edit personal data and log weight (chart included) |
-| 🎯 **Goals** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
-| 🏃 **Activity** | Garmin Connect dashboard — steps, calories, sleep, body battery, resting HR, VO2 max, training streak and recent activities |
-| 🥗 **Nutrition & Preferences** | Manage likes, dislikes, allergies, restrictions and goals |
-| 💬 **Conversation** | Chat with the agents in real time + XAI panel |
-| ⚙️ **Administration** | Sub-tabs: Explainability · Sessions · Logs · Knowledge Base |
-
-The **sidebar** shows the active account selector, a **➕ Create new account** button (launches the Onboarding wizard), and a **🗑️ Remove Account** button (with confirmation step before deleting all user data).
-
-> The **User ID** is shared across all tabs. Use your Telegram user ID to access existing profile data in the web UI.
-
-### 🎯 Objectivo Dashboard
-
-The dashboard tab gives a real-time snapshot of health progress without needing to ask the assistant:
-
-- **KPIs** — current values for body fat %, visceral fat, muscle mass and weight, each compared against the personalised target derived from the user's goals
-- **Progress charts** — interactive time-series for all four metrics, filterable by start date
-- **Progress summary** — natural-language summary of distance to each target and trend direction
-- **Smart target inference** — targets are automatically computed from the user's stated goals (e.g. "lose visceral fat to level 6" or "reach 75 kg") using numeric extraction and BMI/lean-mass formulas as fallback
+| 🚀 **Onboarding** | New account wizard |
+| 👤 **Profile** | Edit personal data and log weight |
+| 🎯 **Goals** | Dashboard — KPIs, progress charts and goal tracking |
+| 🏃 **Activity** | Garmin Connect dashboard (steps, calories, sleep, body battery, VO2 max) |
+| 🥗 **Nutrition & Preferences** | Manage likes, dislikes, allergies and restrictions |
+| 💬 **Conversation** | Chat with the agents + XAI panel |
+| ⚙️ **Administration** | Explainability · Sessions · Logs · Knowledge Base |
 
 ---
 
-## 📊 Tanita Body Composition Sync
-
-The **Body Composition Analyst** agent connects to [MyTanita.eu](https://mytanita.eu) and automatically downloads your scale measurements using browser automation (Playwright). No manual export needed.
-
-**Metrics tracked** (11 fields per measurement):
-
-| Metric | Description |
-|---|---|
-| `weight_kg` | Body weight in kg |
-| `bmi` | Body Mass Index |
-| `body_fat_pct` | Body fat percentage |
-| `visceral_fat` | Visceral fat level (1–59) |
-| `muscle_mass_kg` | Skeletal muscle mass in kg |
-| `muscle_quality` | Muscle quality score |
-| `bone_mass_kg` | Bone mass in kg |
-| `bmr_kcal` | Basal Metabolic Rate (kcal/day) |
-| `metabolic_age` | Metabolic age (years) |
-| `body_water_pct` | Body water percentage |
-| `physique_rating` | Physique rating (1–9) |
-
-**Example prompts:**
-- "Sync my Tanita measurements"
-- "What was my body fat on 15/03/2026?"
-- "Show my visceral fat trend over the last 3 months"
-
----
-
-## 🗂️ Project Structure
+<details>
+<summary>🗂️ <b>Project Structure</b></summary>
 
 ```
 MyHealthAssistant/
-├── main.py                           # Entry point — starts Telegram bot + Gradio UI
+├── main.py                           # Entry point — Telegram bot + Gradio UI
 ├── requirements.txt
 ├── .env / .env.example
 ├── ARCHITECTURE.md                   # Flow diagrams and architecture decisions
 ├── scripts/
-│   ├── setup.sh                      # Setup script (macOS / Linux)
-│   ├── setup.bat                     # Setup script (Windows)
-│   ├── setup_credentials.py          # Interactive credential setup (Tanita + Garmin)
-│   └── garmin_browser_auth.py        # Garmin OAuth browser flow (generates tokens)
+│   ├── setup.sh / setup.bat          # Dependency installation
+│   ├── setup_telegram.py             # Save Telegram token encrypted (required, once)
+│   ├── setup_credentials.py          # Tanita credentials
+│   └── garmin_browser_auth.py        # Garmin OAuth browser flow
 ├── config/
 │   └── __init__.py                   # Configuration constants + LLM model factory
 ├── agents/
@@ -390,34 +319,34 @@ MyHealthAssistant/
 │   └── activity_analyst.py           # Activity Analyst agent (Garmin Connect)
 ├── interfaces/
 │   ├── telegram_bot.py               # Telegram interface + onboarding flow
-│   └── gradio/                       # Gradio Web UI
+│   └── gradio/
 │       ├── app.py                    # Entry point — Blocks layout + all event handlers
 │       ├── shared.py                 # Shared utilities (agent team, session mgmt, DB helpers)
 │       ├── styles.py                 # CSS styles
-│       └── tabs/                     # One module per tab
+│       └── tabs/
 │           ├── onboarding_tab.py     # 🚀 Onboarding wizard (new user creation)
-│           ├── chat_tab.py           # 💬 Conversation
 │           ├── profile_tab.py        # 👤 Profile
 │           ├── goals_tab.py          # 🎯 Goals dashboard
+│           ├── activity_tab.py       # 🏃 Activity dashboard (Garmin — steps, sleep, VO2 max…)
 │           ├── nutrition_tab.py      # 🥗 Nutrition & Preferences
-│           ├── activity_tab.py       # 🏃 Activity dashboard (Garmin Connect)
+│           ├── chat_tab.py           # 💬 Conversation + XAI panel
 │           └── admin_tab.py          # ⚙️ Administration
+├── tools/
+│   ├── credential_store.py           # Encrypted credential store (Fernet/SQLite)
+│   ├── tanita_tools.py               # Tanita sync via Playwright
+│   ├── garmin_tools.py               # Garmin Connect API
+│   ├── profile_tools.py              # Profile, weight, goals
+│   ├── nutrition_tools.py            # Calories, macros, food lookup
+│   └── exercise_tools.py             # Exercises, workouts, MET
 ├── knowledge/
 │   ├── __init__.py                   # KnowledgeBase class — ChromaDB wrapper
 │   └── seed_data.py                  # Initial seed data (nutrition + exercises)
-├── tools/
-│   ├── nutrition_tools.py            # Calories, macros, food lookup (Open Food Facts fallback)
-│   ├── exercise_tools.py             # Exercises, workout plans, calorie burn (MET)
-│   ├── profile_tools.py              # Profile, preferences, weight history, goals sync
-│   ├── tanita_tools.py               # Tanita portal sync via Playwright
-│   ├── garmin_tools.py               # Garmin Connect API (steps, sleep, HR, activities, …)
-│   └── credential_store.py           # Encrypted per-user credential store (Fernet/SQLite)
 ├── xai/
 │   └── __init__.py                   # ExplainabilityTracker + @xai_tool decorator
 ├── eval/
 │   └── run_eval.py                   # Automated evaluation — 20 pre-defined queries
 ├── tests/
-│   ├── conftest.py                   # Shared pytest fixtures
+│   ├── conftest.py
 │   ├── test_knowledge.py
 │   ├── test_tools_nutrition.py
 │   ├── test_tools_exercise.py
@@ -425,33 +354,85 @@ MyHealthAssistant/
 │   ├── test_tools_tanita.py
 │   └── test_xai.py
 ├── data/
-│   ├── chromadb/                     # Vector store (preferences, nutrition, exercises)
-│   ├── garmin_tokens/                # Per-user Garmin OAuth tokens (data/garmin_tokens/<uid>/)
-│   ├── user_profiles.db              # SQLite — profiles, weight history, body composition, credentials
-│   └── sessions.db                   # SQLite — conversation sessions (Agno)
-└── logs/
-    └── health-assistant.log          # Rotating log (5 MB × 3 files, append across runs)
+│   ├── user_profiles.db              # SQLite — profiles, weight, body composition, credentials
+│   ├── sessions.db                   # SQLite — conversation history (Agno)
+│   ├── chromadb/                     # Vector store
+│   └── garmin_tokens/                # Per-user Garmin OAuth tokens
+└── logs/health-assistant.log         # Rotating log (5 MB × 3 files)
 ```
 
----
+</details>
 
-## 🏃 Garmin Connect Integration
+<details>
+<summary>🗄️ <b>Data Storage</b></summary>
 
-The **Activity Analyst** agent retrieves training and wellness data from [Garmin Connect](https://connect.garmin.com) via the `garminconnect` library. Since Garmin's SSO rate-limits programmatic password login, a **one-time browser authentication** is required per user.
+**SQLite `user_profiles.db`**
 
-### First-time setup
+| Table | Contents |
+|---|---|
+| `user_profiles` | Personal data, activity level, goal |
+| `weight_history` | Weight log |
+| `body_composition_history` | Tanita measurements (11 metrics) |
+| `user_credentials` | Encrypted credentials: Telegram token (`_system_`), Tanita (per user) |
 
-```bash
-# 1. Generate the encryption key and add it to .env as SECRET_KEY
-python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+**SQLite `sessions.db`** — conversation history managed by Agno. Not accessed directly by the application code.
 
-# 2. Run the browser auth flow (opens a Chromium window)
-python scripts/garmin_browser_auth.py --user <user_id>
-```
+**ChromaDB `data/chromadb/`** — three collections, all using cosine similarity with `all-MiniLM-L6-v2` embeddings:
 
-Log in with your Garmin account in the browser. OAuth tokens are saved to `data/garmin_tokens/<user_id>/` and reused automatically for ~6 months. **No password is stored.**
+| Collection | What is stored | How it is used |
+|---|---|---|
+| `user_preferences` | Food likes/dislikes, allergies, dietary restrictions, health goals | Filtered by `user_id` + `category`; semantic search for free-text preference queries |
+| `nutrition_knowledge` | Foods, calories, macros, diet guidance | Semantic RAG — retrieved by the Nutritionist and Chef agents |
+| `exercise_knowledge` | Exercise descriptions, muscle groups, workout plans, calorie burn estimates | Semantic RAG — retrieved by the Personal Trainer agent |
 
-### Metrics available
+> **Goals sync:** when a goal is added or updated it is written to both ChromaDB (for semantic search) and SQLite (for the dashboard's target computation and agent context).
+
+**`data/garmin_tokens/<user_id>/`** — Garmin OAuth tokens (JSON files, ~6 months validity).
+
+</details>
+
+<details>
+<summary>🔍 <b>Explainability (XAI)</b></summary>
+
+Every agent response is accompanied by a detailed XAI report available in the **Explainability** tab (Gradio):
+
+- **Specialist activated** — which agent handled the request
+- **Tools called** — function name, arguments, and result summary
+- **RAG queries** — which ChromaDB collection was searched, with what query, and how many documents were retrieved
+- **Formula notes** — mathematical foundations shown for caloric calculations (Mifflin-St Jeor) and calorie burn estimates (MET)
+
+</details>
+
+<details>
+<summary>📊 <b>Tanita — Body Composition Metrics</b></summary>
+
+The **Body Composition Analyst** agent connects to [MyTanita.eu](https://mytanita.eu) and automatically downloads scale measurements via browser automation (Playwright). No manual export needed.
+
+| Metric | Description |
+|---|---|
+| `weight_kg` | Body weight (kg) |
+| `bmi` | Body Mass Index |
+| `body_fat_pct` | Body fat percentage |
+| `visceral_fat` | Visceral fat level (1–59) |
+| `muscle_mass_kg` | Skeletal muscle mass (kg) |
+| `muscle_quality` | Muscle quality score |
+| `bone_mass_kg` | Bone mass (kg) |
+| `bmr_kcal` | Basal Metabolic Rate (kcal/day) |
+| `metabolic_age` | Metabolic age (years) |
+| `body_water_pct` | Body water percentage |
+| `physique_rating` | Physique rating (1–9) |
+
+**Example prompts:**
+- "Sync my Tanita measurements"
+- "What was my body fat on 15/03/2026?"
+- "Show my visceral fat trend over the last 3 months"
+
+</details>
+
+<details>
+<summary>🏃 <b>Garmin Connect — Available Metrics</b></summary>
+
+The **Activity Analyst** agent retrieves training and wellness data from [Garmin Connect](https://connect.garmin.com) via the `garminconnect` library. Since Garmin's SSO rate-limits programmatic login, a **one-time browser authentication** is required per user (see step 7).
 
 | Metric | Description |
 |---|---|
@@ -464,50 +445,19 @@ Log in with your Garmin account in the browser. OAuth tokens are saved to `data/
 | `training_streak_days` | Consecutive active days |
 | Activities list | Type, duration, distance, calories, average HR |
 
-### Example prompts
-
+**Example prompts:**
 - "How many steps did I take this week?"
 - "How was my sleep last night?"
 - "Show my body battery trend over the last 2 weeks"
 - "What activities did I do this month?"
 - "What's my VO2 max?"
 
----
+</details>
 
-## 🗄️ Data Storage
+<details>
+<summary>🛡️ <b>Ethics & Safety</b></summary>
 
-The project uses **three persistent stores**, each with a distinct role:
-
-### SQLite — `data/user_profiles.db`
-
-| Table | Fields |
-|---|---|
-| `user_profiles` | `user_id`, `name`, `birth_date`, `gender`, `height_cm`, `weight_kg`, `activity_level`, `goal`, `created_at`, `updated_at` |
-| `weight_history` | `user_id`, `weight_kg`, `recorded_at` |
-| `body_composition_history` | `user_id`, `measured_at`, `weight_kg`, `bmi`, `body_fat_pct`, `visceral_fat`, `muscle_mass_kg`, `muscle_quality`, `bone_mass_kg`, `bmr_kcal`, `metabolic_age`, `body_water_pct`, `physique_rating` |
-| `user_credentials` | `user_id`, `service` (tanita / garmin), `username_enc`, `password_enc`, `updated_at` — Fernet-encrypted |
-
-### SQLite — `data/sessions.db`
-
-Managed automatically by Agno. Stores the full conversation history (messages, tool calls, agent responses) per user session. Not accessed directly by the application code.
-
-### ChromaDB — `data/chromadb/` (vector store)
-
-Three collections, all using **cosine similarity** with `all-MiniLM-L6-v2` embeddings (ChromaDB default):
-
-| Collection | What is stored | How it is used |
-|---|---|---|
-| `user_preferences` | Short texts per user: food likes/dislikes, allergies, dietary restrictions, health goals | Filtered by `user_id` + `category` metadata; semantic search for free-text preference queries |
-| `nutrition_knowledge` | Nutritional information: foods, calories, macros, diet guidance | Semantic RAG — retrieved by the Nutritionist and Chef agents |
-| `exercise_knowledge` | Exercise descriptions, muscle groups, workout plans, calorie burn estimates | Semantic RAG — retrieved by the Personal Trainer agent |
-
-> **Goals sync:** when a goal is added or updated it is written to both ChromaDB (for semantic search) and SQLite (for the dashboard's target computation and agent context).
-
----
-
-## 🛡️ Ethics & Safety
-
-The Coordinator enforces non-negotiable guardrails on every message before routing:
+The Coordinator enforces non-negotiable guardrails on every message:
 
 - **Refuses** extreme caloric restriction (< 800 kcal/day without medical supervision)
 - **Refuses** promotion of disordered eating (purging, multi-day fasting, etc.)
@@ -517,102 +467,66 @@ The Coordinator enforces non-negotiable guardrails on every message before routi
 - **Recommends** certified professionals for medical conditions, pregnancy, or chronic illness
 - **GDPR-aware** — only uses data explicitly provided by the user; never cross-references users
 
----
+</details>
 
-## 🔍 Explainability (XAI)
+<details>
+<summary>🧪 <b>Automated Evaluation</b></summary>
 
-Every agent response is accompanied by a detailed XAI report available in the **Explainability** tab (Gradio):
-
-- **Specialist activated** — which agent handled the request
-- **Tools called** — function name, arguments, and result summary
-- **RAG queries** — which ChromaDB collection was searched, with what query, and how many documents were retrieved
-- **Formula notes** — mathematical foundations shown for caloric calculations (Mifflin-St Jeor) and calorie burn estimates (MET)
-
----
-
-## 🧪 Automated Evaluation
-
-The project includes an evaluation suite with **20 pre-defined queries** covering routing correctness, content quality, ethics guardrails, and edge cases:
+Evaluation suite with **20 pre-defined queries** covering routing, quality, ethics guardrails and edge cases:
 
 ```bash
-# Run all 20 tests
-python -X utf8 eval/run_eval.py
-
-# Run a single test
-python -X utf8 eval/run_eval.py --test-id Q15
-
-# Show full agent responses
-python -X utf8 eval/run_eval.py --verbose
-
-# Export JSON report
+python -X utf8 eval/run_eval.py                          # run all tests
+python -X utf8 eval/run_eval.py --verbose                # show full agent responses
 python -X utf8 eval/run_eval.py --output eval/report.json
 ```
 
-| Category | Tests | What is verified |
-|---|---|---|
-| Routing | Q01–Q09 | Each agent receives the correct message type |
-| Quality | Q10–Q14 | Responses include expected content (macros, recipe steps, formulas) |
-| Ethics | Q15–Q17 | Refusals triggered for extreme diets, diagnoses, off-topic requests |
-| Edge cases | Q18–Q20 | Informal language, English input replied in Portuguese, allergen substitution |
+</details>
 
----
+<details>
+<summary>🔧 <b>Design Notes</b></summary>
 
-## 🔧 Design Notes
-
-### Language
-
-All **code** (agent instructions, tool docstrings, module docstrings) is in **English** — English yields better results with smaller local models for routing and tool-calling decisions.
-
+**Language**
+All **code** (agent instructions, tool docstrings) is in **English** — English yields better results with smaller local models for routing and tool-calling decisions.
 **User-facing responses** are in **European Portuguese** — the Coordinator enforces this regardless of the language the user writes in.
 
-### Switching LLM providers
+**Switching LLM providers**
+Change `LLM_PROVIDER` in `.env` — no code changes required. The `get_model()` factory in `config/__init__.py` instantiates the correct Agno model for all agents automatically.
 
-Just change `LLM_PROVIDER` in `.env` — no code changes required. The `get_model()` factory in `config/__init__.py` instantiates the correct Agno model object for all agents automatically.
-
-### Session persistence
-
+**Session persistence**
 Agno automatically persists each session's history in `data/sessions.db`. Each user has one active session. `/reset` (Telegram) or "New Session" (Gradio) creates a new session without deleting previous history.
 
-### Log persistence
+**Log persistence**
+Logs are written in **append mode** across restarts — each run appends to `logs/health-assistant.log` with a `── new run ──` separator. Rotates at 5 MB (up to 3 backup files).
 
-Logs are written in **append mode** across restarts — each run appends to `logs/health-assistant.log` with a `── new run ──` separator. The file rotates at 5 MB (up to 3 backup files kept).
+**User ID forwarding**
+Every message arriving at the Coordinator is prefixed with `[Today's date: DD/MM/YYYY] [User ID: <UID>]`. The Coordinator includes the UID at the top of every task routed to a specialist, ensuring all tool calls use the correct user account regardless of routing depth.
 
-### User ID forwarding
+</details>
 
-Every message arriving at the Coordinator is prefixed with `[Today's date: DD/MM/YYYY] [User ID: <UID>]`. The Coordinator extracts the UID and includes it verbatim at the top of every task routed to a specialist, ensuring all tool calls use the correct user account regardless of routing depth.
+<details>
+<summary>🛠️ <b>Customisation</b></summary>
 
----
-
-## 🛠️ Customisation
-
-### Add your own initial preferences
-
-Edit `knowledge/seed_data.py` — update the `FOOD_LIKES`, `FOOD_DISLIKES`, `ALLERGIES`, and `RESTRICTIONS` lists. Then reset the vector store:
-
+**Add initial preferences:** edit `knowledge/seed_data.py` and reset the vector store:
 ```bash
-# Windows
-Remove-Item -Recurse -Force data\chromadb
-
-# macOS / Linux
-rm -rf data/chromadb
-
+rm -rf data/chromadb   # macOS / Linux
 python main.py
 ```
 
-### Add new agents
-
+**Add new agents:**
 1. Create a file in `agents/` following the existing pattern
 2. Add it as a `member` in `coordinator.py`
-3. Create specific tools in `tools/` if needed, decorated with `@xai_tool`
+3. Create tools in `tools/` decorated with `@xai_tool`
+
+</details>
 
 ---
 
 ## 🤝 Contributing
 
 1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/YourFeature`
-3. Commit your changes: `git commit -m "Add YourFeature"`
-4. Push to the branch: `git push origin feature/YourFeature`
+2. Create a branch: `git checkout -b feature/YourFeature`
+3. Commit: `git commit -m "Add YourFeature"`
+4. Push: `git push origin feature/YourFeature`
 5. Open a Pull Request
 
 Follow [PEP 8](https://peps.python.org/pep-0008/), add docstrings to new functions, and update this README if adding new features.
@@ -622,10 +536,9 @@ Follow [PEP 8](https://peps.python.org/pep-0008/), add docstrings to new functio
 ## 🆘 Support
 
 - **Issues**: [github.com/brunomigueldasilva/my-health-assistant/issues](https://github.com/brunomigueldasilva/my-health-assistant/issues)
-- **Discussions**: [github.com/brunomigueldasilva/my-health-assistant/discussions](https://github.com/brunomigueldasilva/my-health-assistant/discussions)
 - **Email**: [bruno_m_c_silva@proton.me](mailto:bruno_m_c_silva@proton.me)
 
-When reporting a bug, include: Python version, OS, error message, and steps to reproduce.
+When reporting a bug, include: Python version, OS, error message and steps to reproduce.
 
 ---
 

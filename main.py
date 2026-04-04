@@ -49,8 +49,8 @@ from config import (
     OLLAMA_MODEL,
     OPENAI_API_KEY,
     OPENAI_MODEL,
-    TELEGRAM_BOT_TOKEN,
 )
+from tools.credential_store import get_telegram_token
 from knowledge import get_knowledge_base
 from knowledge.seed_data import seed_all
 from interfaces.telegram_bot import create_telegram_app
@@ -118,8 +118,11 @@ def _validate_config() -> None:
         sys.exit(1)
 
 def _validate_telegram() -> list[str]:
-    if not TELEGRAM_BOT_TOKEN:
-        return ["TELEGRAM_BOT_TOKEN not set in .env"]
+    if not get_telegram_token():
+        return [
+            "Token do Telegram não configurado.\n"
+            "  Execute: python scripts/setup_telegram.py"
+        ]
     return []
 
 

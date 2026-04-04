@@ -22,7 +22,8 @@ from telegram.ext import (
     filters,
 )
 
-from config import TELEGRAM_BOT_TOKEN, SQLITE_DB
+from config import SQLITE_DB
+from tools.credential_store import get_telegram_token
 from agents.coordinator import create_health_team
 from knowledge import get_knowledge_base
 from tools.profile_tools import (
@@ -1760,10 +1761,14 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 # ══════════════════════════════════════════════════════
 
 def create_telegram_app() -> Application:
-    if not TELEGRAM_BOT_TOKEN:
-        raise ValueError("TELEGRAM_BOT_TOKEN not set in .env!")
+    token = get_telegram_token()
+    if not token:
+        raise ValueError(
+            "Token do Telegram não configurado.\n"
+            "  Execute: python scripts/setup_telegram.py"
+        )
 
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    app = Application.builder().token(token).build()
 
     # Inline keyboard callbacks (highest priority)
     app.add_handler(CallbackQueryHandler(handle_onboarding_callback, pattern="^ob_"))

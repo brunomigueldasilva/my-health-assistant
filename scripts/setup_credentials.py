@@ -1,8 +1,18 @@
 #!/usr/bin/env python3
 """
-Interactive script to store per-user credentials in the encrypted credential store.
+Guarda credenciais de serviços externos no credential store encriptado.
 
-Usage:
+Serviços suportados:
+  telegram  — token do bot (obtido no @BotFather)
+  tanita    — conta MyTanita (email + password)
+  garmin    — ver nota abaixo
+
+Nota Garmin: as credenciais Garmin não são guardadas aqui porque o Garmin
+Connect bloqueia o login programático. Em vez disso usa autenticação OAuth
+via browser:
+  python scripts/garmin_browser_auth.py --user <user_id>
+
+Uso:
     python scripts/setup_credentials.py
 """
 
@@ -12,53 +22,92 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from tools.credential_store import set_credential, get_credential, list_services
+from tools.credential_store import (
+    set_credential,
+    get_credential,
+    list_services,
+    set_telegram_token,
+    get_telegram_token,
+)
+
+_SERVICES = ("telegram", "tanita")
 
 
-def main():
-    print("=" * 52)
-    print("  MyHealthAssistant — Configuração de Credenciais")
-    print("=" * 52)
-    print()
-
-    user_id = input("User ID (ID do Telegram ou username): ").strip()
-    if not user_id:
-        print("ERRO: User ID não pode estar vazio.")
-        sys.exit(1)
-
-    print()
-    print("Serviços disponíveis: tanita, garmin")
-    service = input("Serviço a configurar: ").strip().lower()
-    if service not in ("tanita", "garmin"):
-        print(f"ERRO: Serviço '{service}' não reconhecido.")
-        sys.exit(1)
-
-    # Check if credentials already exist
-    existing = get_credential(user_id, service)
+def _setup_telegram():
+    existing = get_telegram_token()
     if existing:
-        print(f"\n⚠️  Já existem credenciais para user={user_id!r} / service={service!r}.")
+        preview = existing[:10] + "..." if len(existing) > 10 else existing
+        print(f"\n⚠️  Já existe um token Telegram configurado: {preview}")
         overwrite = input("Substituir? (s/N): ").strip().lower()
         if overwrite != "s":
             print("Cancelado.")
-            sys.exit(0)
+            return
 
     print()
-    username = input("Email / Username: ").strip()
-    password = getpass.getpass("Password (não aparece no ecrã): ")
+    print("Obtém o token no @BotFather do Telegram:")
+    print("  /newbot  para criar um novo bot")
+    print("  /mybots  para ver bots existentes")
+    print()
+    token = getpass.getpass("Token do bot (não aparece no ecrã): ").strip()
+    if not token:
+        print("ERRO: O token não pode estar vazio.")
+        return
 
+    set_telegram_token(token)
+    preview = token[:10] + "..."
+    print(f"\n✅  Token Telegram guardado ({preview})")
+
+
+def _setup_tanita(user_id: str):
+    existing = get_credential(user_id, "tanita")
+    if existing:
+        print(f"\n⚠️  Já existem credenciais Tanita para o utilizador {user_id!r}.")
+        overwrite = input("Substituir? (s/N): ").strip().lower()
+        if overwrite != "s":
+            print("Cancelado.")
+            return
+
+    print()
+    username = input("Email MyTanita: ").strip()
+    password = getpass.getpass("Password (não aparece no ecrã): ")
     if not username or not password:
         print("ERRO: Email e password não podem estar vazios.")
+        return
+
+    set_credential(user_id, "tanita", username, password)
+    print(f"\n✅  Credenciais Tanita guardadas para o utilizador {user_id!r}.")
+
+
+def main():
+    print("=" * 54)
+    print("  MyHealthAssistant — Configuração de Credenciais")
+    print("=" * 54)
+    print()
+    print("Serviços disponíveis:")
+    print("  telegram  — token do bot (necessário antes de iniciar)")
+    print("  tanita    — conta MyTanita (sincronização de composição corporal)")
+    print("  garmin    — usa garmin_browser_auth.py (autenticação OAuth)")
+    print()
+
+    service = input("Serviço a configurar: ").strip().lower()
+    if service not in _SERVICES:
+        print(f"ERRO: Serviço '{service}' não reconhecido.")
+        print(f"Opções: {', '.join(_SERVICES)}")
         sys.exit(1)
 
-    set_credential(user_id, service, username, password)
+    if service == "telegram":
+        _setup_telegram()
+    else:
+        user_id = input("\nUser ID (ID numérico do Telegram ou username): ").strip()
+        if not user_id:
+            print("ERRO: User ID não pode estar vazio.")
+            sys.exit(1)
+        _setup_tanita(user_id)
 
-    print()
-    print(f"✅  Credenciais guardadas para user={user_id!r} / service={service!r}.")
-    print()
+        print()
+        services = list_services(user_id)
+        print(f"Serviços configurados para {user_id!r}: {', '.join(services)}")
 
-    # Show all stored services for this user
-    services = list_services(user_id)
-    print(f"Serviços configurados para o utilizador {user_id!r}: {', '.join(services)}")
     print()
 
 
