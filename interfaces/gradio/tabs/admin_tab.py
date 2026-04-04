@@ -24,7 +24,7 @@ for _p in (_root, _iface):
 from config import BASE_DIR, SQLITE_SESSIONS
 from shared import _db_conn, list_users, check_user_status
 from knowledge import get_knowledge_base
-from tools.profile_tools import update_user_profile
+from tools.profile_tools import update_user_profile, delete_all_user_data
 
 LOG_FILE = BASE_DIR / "logs" / "health-assistant.log"
 
@@ -62,7 +62,7 @@ def load_sessions(user_id_filter: str = ""):
         if isinstance(ts_updated, int):
             ts_updated = datetime.fromtimestamp(ts_updated).strftime("%Y-%m-%d %H:%M")
         data.append([
-            r["session_id"][:20] + "…" if len(r["session_id"]) > 20 else r["session_id"],
+            r["session_id"][:36] + "…" if len(r["session_id"]) > 36 else r["session_id"],
             r["user_id"] or "",
             r["session_type"] or "",
             run_count,
@@ -233,6 +233,18 @@ def kb_stats_fn():
     )
 
 
+# ── User deletion (used by sidebar) ──────────────────────
+
+def delete_user_fn(uid: str):
+    """Delete all data for uid and return (status_msg, dropdown_update, new_uid)."""
+    if not uid or not uid.strip():
+        return "❌ Nenhum utilizador selecionado.", gr.update(), gr.update()
+    result = delete_all_user_data(uid.strip())
+    users = list_users()
+    new_uid = users[0][1] if users else ""
+    return result, gr.update(choices=users, value=new_uid or None), new_uid
+
+
 # ── User creation (used by sidebar) ──────────────────────
 
 def create_user_fn(name: str, uid: str):
@@ -274,6 +286,7 @@ def build_admin_tab() -> SimpleNamespace:
             sessions_table = gr.DataFrame(
                 headers=["Session ID", "User ID", "Tipo", "Mensagens", "Atualizado"],
                 datatype=["str", "str", "str", "number", "str"],
+                column_widths=["35%", "20%", "15%", "10%", "20%"],
                 interactive=False,
             )
             with gr.Row():

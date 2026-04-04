@@ -559,6 +559,7 @@ canvas.addEventListener('mouseleave', () => {{ chart._ch = null; chart.draw(); }
 
 def load_all_comp_charts(user_id, period: str = "Último Ano") -> tuple:
     uid = (user_id or "").strip()
+    period = period or "Último Ano"
     if not uid:
         return ("",) * 8
     return (

@@ -57,7 +57,20 @@ from tabs.admin_tab import (
     add_knowledge_fn,
     delete_knowledge_fn,
     kb_stats_fn,
-    create_user_fn,
+    delete_user_fn,
+)
+from tabs.onboarding_tab import (
+    build_onboarding_tab,
+    onb_create_user,
+    onb_step2_next,
+    onb_step3_back,
+    onb_step3_next,
+    onb_step4_back,
+    onb_step4_next,
+    onb_step5_back,
+    onb_finish,
+    onb_restart,
+    onb_full_reset,
 )
 
 _CSS = CSS  # exported for main.py → gradio_demo.launch(css=_CSS)
@@ -83,33 +96,43 @@ with gr.Blocks(title="Health Assistant") as demo:
 
         # Hidden state — driven programmatically; used as input across all tabs
         global_uid = gr.State(value=_initial_uid)
+        # Mirrors profile.comp_period so timer/load chains always have a valid
+        # value even when the Profile tab or its accordion is not active.
+        comp_period_state = gr.State(value="Último Ano")
 
-        with gr.Accordion("➕ Novo Utilizador", open=False):
-            new_user_name = gr.Textbox(label="Nome", placeholder="Ex: Bruno")
-            new_user_id_input = gr.Textbox(label="ID da Conta", placeholder="Ex: 29255997")
-            create_user_btn = gr.Button("Criar Conta", variant="primary")
-            create_user_status = gr.Markdown()
+        new_user_btn = gr.Button("➕ Criar nova conta", variant="secondary", size="sm")
+        delete_user_btn = gr.Button("🗑️ Remover Conta", variant="stop", size="sm")
+
+        with gr.Group(visible=False) as delete_confirm_group:
+            gr.Markdown("⚠️ **Tens a certeza?** Todos os dados serão apagados permanentemente.")
+            with gr.Row():
+                delete_confirm_btn = gr.Button("Confirmar", variant="stop", size="sm")
+                delete_cancel_btn = gr.Button("Cancelar", variant="secondary", size="sm")
+        delete_user_status = gr.Markdown()
 
         gr.Markdown("---")
         reset_btn = gr.Button("🗑️ Limpar Conversa", variant="secondary", size="sm")
         reset_status = gr.Markdown()
 
     # ── Tabs ─────────────────────────────────────────────
-    with gr.Tabs():
+    with gr.Tabs() as main_tabs:
 
-        with gr.Tab("💬 Conversa"):
-            chat = build_chat_tab()
+        with gr.Tab("🚀 Onboarding", id="onboarding") as onb_tab_ref:
+            onboarding = build_onboarding_tab()
 
-        with gr.Tab("👤 Perfil"):
+        with gr.Tab("👤 Perfil", id="profile") as profile_tab_ref:
             profile = build_profile_tab()
 
-        with gr.Tab("🎯 Objectivo"):
+        with gr.Tab("🎯 Objectivo", id="goals") as goals_tab_ref:
             goals = build_goals_tab()
 
-        with gr.Tab("🥗 Nutrição e Gostos"):
+        with gr.Tab("🥗 Nutrição e Gostos", id="nutrition") as nutrition_tab_ref:
             nutrition = build_nutrition_tab()
 
-        with gr.Tab("⚙️ Administração"):
+        with gr.Tab("💬 Conversa", id="chat") as chat_tab_ref:
+            chat = build_chat_tab()
+
+        with gr.Tab("⚙️ Administração", id="admin"):
             admin = build_admin_tab()
 
     # ── Auto-refresh timer ───────────────────────────────
@@ -147,6 +170,120 @@ with gr.Blocks(title="Health Assistant") as demo:
 
     # ── EVENT HANDLERS ───────────────────────────────────
 
+    # 0. Onboarding wizard
+    def _initial_tab_state(uid):
+        """Hide/show onboarding tab AND navigate to the right tab."""
+        if uid and uid.strip():
+            return gr.update(visible=False), gr.update(selected="profile")
+        return gr.update(visible=True), gr.update(selected="onboarding")
+
+    onboarding.create_btn.click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[onboarding.create_loading],
+    ).then(
+        onb_create_user,
+        inputs=[onboarding.new_name, onboarding.new_uid_input],
+        outputs=[onboarding.step1_error, onboarding.step1_group, onboarding.step2_group, onboarding.onb_uid, onboarding.create_loading],
+    )
+    onboarding.step2_next.click(
+        onb_step2_next,
+        inputs=[onboarding.weight],
+        outputs=[onboarding.step2_error, onboarding.step2_group, onboarding.step3_group],
+    )
+    onboarding.step3_back.click(
+        onb_step3_back,
+        outputs=[onboarding.step3_group, onboarding.step2_group],
+    )
+    onboarding.step3_next.click(
+        onb_step3_next,
+        outputs=[onboarding.step3_group, onboarding.step4_group],
+    )
+    onboarding.step4_back.click(
+        onb_step4_back,
+        outputs=[onboarding.step4_group, onboarding.step3_group],
+    )
+    onboarding.goals.change(
+        fn=lambda selected: (
+            gr.update(visible="🎯 Atingir peso específico" in selected),
+            gr.update(visible="💪 Atingir massa muscular específica" in selected),
+            gr.update(visible="📊 Atingir gordura corporal específica" in selected),
+            gr.update(visible="🔬 Atingir gordura visceral específica" in selected),
+        ),
+        inputs=[onboarding.goals],
+        outputs=[
+            onboarding.target_weight_group,
+            onboarding.target_muscle_group,
+            onboarding.target_body_fat_group,
+            onboarding.target_visceral_group,
+        ],
+    )
+    onboarding.step4_next.click(
+        onb_step4_next,
+        inputs=[onboarding.goals],
+        outputs=[onboarding.step4_error, onboarding.step4_group, onboarding.step5_group],
+    )
+    onboarding.step5_back.click(
+        onb_step5_back,
+        outputs=[onboarding.step5_group, onboarding.step4_group],
+    )
+    onboarding.finish_btn.click(
+        onb_finish,
+        inputs=[
+            onboarding.onb_uid,
+            onboarding.gender,
+            onboarding.birth_date,
+            onboarding.height,
+            onboarding.weight,
+            onboarding.activity,
+            onboarding.goals,
+            onboarding.allergies,
+            onboarding.target_weight_val,
+            onboarding.target_muscle_val,
+            onboarding.target_body_fat_val,
+            onboarding.target_visceral_val,
+        ],
+        outputs=[
+            onboarding.step5_error,
+            onboarding.step5_group,
+            onboarding.step6_group,
+            onboarding.done_md,
+            global_uid,
+        ],
+    ).then(
+        lambda uid: (gr.update(choices=list_users(), value=uid), check_user_status(uid)),
+        inputs=[global_uid],
+        outputs=[user_select, user_status],
+    ).then(
+        load_profile,
+        inputs=[global_uid],
+        outputs=_profile_fields,
+    ).then(
+        load_all_prefs,
+        inputs=[global_uid],
+        outputs=_PREF_CHECKS,
+    )
+    onboarding.go_to_chat_btn.click(
+        fn=lambda: (gr.update(visible=False), gr.update(selected="profile")),
+        outputs=[onb_tab_ref, main_tabs],
+    )
+    onboarding.restart_btn.click(
+        onb_restart,
+        outputs=[onboarding.step6_group, onboarding.step1_group],
+    )
+
+    # Tab select — refresh data when switching tabs
+    profile_tab_ref.select(
+        load_profile, inputs=[global_uid], outputs=_profile_fields,
+    ).then(
+        load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
+    )
+    goals_tab_ref.select(
+        load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
+    )
+    nutrition_tab_ref.select(
+        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    )
+
     def _load_xai():
         from xai import get_tracker
         return get_tracker().generate_markdown()
@@ -167,7 +304,10 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[chat.msg_input],
         outputs=[chat.send_btn],
     )
-    reset_btn.click(reset_chat, inputs=[global_uid], outputs=[chat.chatbot, reset_status])
+    reset_btn.click(reset_chat, inputs=[global_uid], outputs=[chat.chatbot, reset_status]).then(
+        lambda: "",
+        outputs=[delete_user_status],
+    )
 
     # 2. Perfil
     profile.load_profile_btn.click(
@@ -217,6 +357,10 @@ with gr.Blocks(title="Health Assistant") as demo:
         load_all_comp_charts,
         inputs=[global_uid, profile.comp_period],
         outputs=_comp_outputs,
+    ).then(
+        lambda p: p,
+        inputs=[profile.comp_period],
+        outputs=[comp_period_state],
     )
 
     # Goals in profile tab
@@ -373,7 +517,31 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(load_knowledge, inputs=[admin.kb_collection, admin.kb_search], outputs=[admin.kb_table])
     admin.kb_stats_btn.click(kb_stats_fn, outputs=[admin.kb_stats_out])
 
-    # 6. Sidebar — user select auto-loads everything
+    # 6. Sidebar — remove account
+    delete_user_btn.click(
+        fn=lambda: gr.update(visible=True),
+        outputs=[delete_confirm_group],
+    )
+    delete_cancel_btn.click(
+        fn=lambda: gr.update(visible=False),
+        outputs=[delete_confirm_group],
+    )
+    delete_confirm_btn.click(
+        delete_user_fn,
+        inputs=[global_uid],
+        outputs=[delete_user_status, user_select, global_uid],
+    ).then(
+        fn=lambda: gr.update(visible=False),
+        outputs=[delete_confirm_group],
+    ).then(
+        check_user_status, inputs=[global_uid], outputs=[user_status],
+    ).then(
+        load_profile, inputs=[global_uid], outputs=_profile_fields,
+    ).then(
+        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    )
+
+    # 7. Sidebar — user select auto-loads everything
     user_select.change(
         fn=lambda uid: uid or "",
         inputs=[user_select],
@@ -387,21 +555,31 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         load_weight_chart, inputs=[user_select, profile.weight_period], outputs=[profile.weight_chart],
     ).then(
-        load_all_comp_charts, inputs=[user_select, profile.comp_period], outputs=_comp_outputs,
+        load_all_comp_charts, inputs=[user_select, comp_period_state], outputs=_comp_outputs,
     ).then(
         load_all_prefs, inputs=[user_select], outputs=_PREF_CHECKS,
+    ).then(
+        load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     )
 
-    create_user_btn.click(
-        create_user_fn,
-        inputs=[new_user_name, new_user_id_input],
-        outputs=[create_user_status, user_select, global_uid, user_status, new_user_name, new_user_id_input],
+    new_user_btn.click(
+        fn=lambda: ("", gr.update(visible=True), gr.update(selected="onboarding")),
+        outputs=[global_uid, onb_tab_ref, main_tabs],
     ).then(
-        load_profile,
-        inputs=[global_uid],
-        outputs=_profile_fields,
-    ).then(
-        load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+        onb_full_reset,
+        outputs=[
+            onboarding.step1_group, onboarding.step2_group, onboarding.step3_group,
+            onboarding.step4_group, onboarding.step5_group, onboarding.step6_group,
+            onboarding.step1_error, onboarding.step2_error,
+            onboarding.step4_error, onboarding.step5_error,
+            onboarding.new_name, onboarding.new_uid_input,
+            onboarding.gender, onboarding.birth_date,
+            onboarding.height, onboarding.weight,
+            onboarding.activity, onboarding.goals, onboarding.allergies,
+            onboarding.target_weight_group, onboarding.target_muscle_group,
+            onboarding.target_body_fat_group, onboarding.target_visceral_group,
+            onboarding.create_loading, onboarding.onb_uid,
+        ],
     )
 
     # 7. Periodic refresh timer
@@ -441,11 +619,13 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
     ).then(
-        load_all_comp_charts, inputs=[global_uid, profile.comp_period], outputs=_comp_outputs,
+        load_all_comp_charts, inputs=[global_uid, comp_period_state], outputs=_comp_outputs,
     ).then(
         load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     ).then(
         load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    ).then(
+        _initial_tab_state, inputs=[global_uid], outputs=[onb_tab_ref, main_tabs],
     )
 
     refresh_timer.tick(
@@ -465,7 +645,7 @@ with gr.Blocks(title="Health Assistant") as demo:
     ).then(
         load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
     ).then(
-        load_all_comp_charts, inputs=[global_uid, profile.comp_period], outputs=_comp_outputs,
+        load_all_comp_charts, inputs=[global_uid, comp_period_state], outputs=_comp_outputs,
     ).then(
         load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     ).then(

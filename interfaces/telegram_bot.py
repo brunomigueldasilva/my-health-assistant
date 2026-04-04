@@ -408,7 +408,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"A tua equipa de saúde está pronta:\n"
             f"🥗 *Nutricionista* · 🏋️ *Trainer* · 👨‍🍳 *Chef*\n\n"
             f"Basta enviares uma mensagem ou usar:\n"
-            f"/help · /perfil · /editar · /peso · /preferencias · /reset",
+            f"/help · /profile · /edit · /weight · /preferences · /reset",
             parse_mode="Markdown",
         )
         return
@@ -438,11 +438,11 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "Comandos disponíveis:\n\n"
         "/start - Iniciar o bot e configurar perfil\n"
-        "/perfil - Ver o teu perfil\n"
-        "/editar - Corrigir dados do perfil (nome, data de nascimento, etc.)\n"
-        "/preferencias - Gerir preferências (gostos, alergias, etc.)\n"
-        "/peso - Registar peso actual\n"
-        "/historico - Ver histórico de pesos\n"
+        "/profile - Ver o teu perfil\n"
+        "/edit - Corrigir dados do perfil (nome, data de nascimento, etc.)\n"
+        "/preferences - Gerir preferências (gostos, alergias, etc.)\n"
+        "/weight - Registar peso actual\n"
+        "/history - Ver histórico de pesos\n"
         "/reset - Reiniciar sessão\n"
         "/help - Mostrar esta ajuda",
     )
@@ -792,7 +792,7 @@ async def _finish_onboarding(query, update: Update, context: ContextTypes.DEFAUL
         f"🎯 Objectivos: {', '.join(d.get('goals_confirmed', [])) or d.get('goal', '—')}\n"
         f"⚠️ Alergias: {allergy_str}\n\n"
         f"A tua equipa já conhece o teu perfil! Começa a conversar 💬\n"
-        f"_Edita preferências a qualquer altura com_ /preferencias"
+        f"_Edita preferências a qualquer altura com_ /preferences"
     )
     _onb_clear(context)
     await query.edit_message_text(summary, parse_mode="Markdown")
@@ -996,7 +996,7 @@ async def _handle_onboarding_text(update: Update, context: ContextTypes.DEFAULT_
 # PREFERENCES MENU — /preferencias
 # ══════════════════════════════════════════════════════
 
-async def cmd_preferencias(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_preferences(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show the preferences category menu."""
     context.user_data.pop(_PREFS_STATE, None)
     context.user_data.pop(_PREFS_ITEMS, None)
@@ -1151,7 +1151,7 @@ async def _handle_prefs_text(update: Update, context: ContextTypes.DEFAULT_TYPE)
 # EDIT PROFILE — /editar
 # ══════════════════════════════════════════════════════
 
-async def cmd_editar(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_edit(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data.pop(_EDIT_STEP, None)
     await update.message.reply_text(
         "✏️ *Editar perfil*\n\nQual campo queres actualizar?",
@@ -1554,14 +1554,14 @@ async def _handle_edit_text(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 # REGULAR COMMAND HANDLERS
 # ══════════════════════════════════════════════════════
 
-async def cmd_perfil(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def cmd_profile(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_user_profile(_uid(update)))
 
 
 
-async def cmd_peso(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def cmd_weight(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not context.args:
-        await update.message.reply_text("❓ Exemplo: `/peso 78.5`", parse_mode="Markdown")
+        await update.message.reply_text("❓ Exemplo: `/weight 78.5`", parse_mode="Markdown")
         return
     try:
         weight = float(context.args[0].replace(",", "."))
@@ -1570,12 +1570,12 @@ async def cmd_peso(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     update_user_profile(_uid(update), weight_kg=weight)
     await update.message.reply_text(
-        f"⚖️ Peso registado: *{weight} kg*\nUsa /historico para ver evolução.",
+        f"⚖️ Peso registado: *{weight} kg*\nUsa /history para ver evolução.",
         parse_mode="Markdown",
     )
 
 
-async def cmd_historico(update: Update, _: ContextTypes.DEFAULT_TYPE):
+async def cmd_history(update: Update, _: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(get_weight_history(_uid(update)))
 
 
@@ -1773,11 +1773,11 @@ def create_telegram_app() -> Application:
     # Commands
     app.add_handler(CommandHandler("start",         cmd_start))
     app.add_handler(CommandHandler("help",          cmd_help))
-    app.add_handler(CommandHandler("perfil",        cmd_perfil))
-    app.add_handler(CommandHandler("editar",        cmd_editar))
-    app.add_handler(CommandHandler("preferencias",  cmd_preferencias))
-    app.add_handler(CommandHandler("peso",          cmd_peso))
-    app.add_handler(CommandHandler("historico",     cmd_historico))
+    app.add_handler(CommandHandler("profile",       cmd_profile))
+    app.add_handler(CommandHandler("edit",          cmd_edit))
+    app.add_handler(CommandHandler("preferences",   cmd_preferences))
+    app.add_handler(CommandHandler("weight",        cmd_weight))
+    app.add_handler(CommandHandler("history",       cmd_history))
     app.add_handler(CommandHandler("reset",         cmd_reset))
 
     # Free-text

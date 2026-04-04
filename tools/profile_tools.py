@@ -111,16 +111,18 @@ def get_user_profile(user_id: str | int) -> str:
         return (
             f"⚠️ Perfil não configurado para user_id={user_id}.\n\n"
             f"Preferências (default):\n{prefs_default}\n\n"
-            f"💡 Usa /perfil para configurar."
+            f"💡 Usa /profile para configurar."
         )
 
+    _gender_labels = {"male": "Masculino", "female": "Feminino", "other": "Outro"}
+    gender_label = _gender_labels.get(row["gender"], row["gender"] or "?")
     age = _age_from_birth_date(row["birth_date"])
     bd = row["birth_date"] or ""
     age_label = f"{age} anos (nasc. {bd})" if age and bd else (f"{age} anos" if age else "?")
     return (
         f"👤 Perfil de {row['name'] or 'Utilizador'}:\n"
         f"  • Idade: {age_label}\n"
-        f"  • Género: {row['gender'] or '?'}\n"
+        f"  • Género: {gender_label}\n"
         f"  • Altura: {row['height_cm'] or '?'} cm\n"
         f"  • Peso: {row['weight_kg'] or '?'} kg\n"
         f"  • Atividade: {row['activity_level'] or '?'}\n"
@@ -339,7 +341,7 @@ def get_weight_history(user_id: str | int, limit: int = 30) -> str:
     conn.close()
 
     if not rows:
-        return "📊 Sem histórico de peso. Usa /peso <kg> para registar."
+        return "📊 Sem histórico de peso. Usa /weight <kg> para registar."
 
     lines = [
         f"📈 Histórico total: {total} registos (de {first_date} a {last_date}). "

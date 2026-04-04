@@ -10,7 +10,7 @@ Multi-agent personal health system built with [Agno](https://github.com/agno-agi
 graph TB
     subgraph Interfaces
         TG["Telegram Bot\n(onboarding · commands · chat)"]
-        GR["Gradio Web UI\n(5 tabs — incl. Objectivo dashboard)"]
+        GR["Gradio Web UI\n(6 tabs — Onboarding · Perfil · Conversa\n· Objectivo · Nutrição · Admin)"]
     end
 
     subgraph agnoTeam["Agno Team — mode=route"]
@@ -235,7 +235,40 @@ flowchart TD
 
 ---
 
-## 7. Architecture decisions
+## 7. Onboarding wizard flow (Gradio)
+
+The **🚀 Onboarding** tab guides new users through account creation without any manual typing beyond free-text fields. It is displayed automatically when no user account is selected and hidden after completion.
+
+```mermaid
+flowchart TD
+    START["Sidebar — ➕ Criar nova conta\nOR first load with no UID"]
+    START --> S1["Step 1 — Create account\nName (required) · custom ID (optional, else auto UUID)"]
+    S1 -->|onb_create_user| S2["Step 2 — Personal data\nGender · Birth date · Height · Weight"]
+    S2 -->|onb_step2_next| S3["Step 3 — Activity level\n(5 options)"]
+    S3 -->|onb_step3_next| S4["Step 4 — Health goals\n(multi-select, up to 3)\n+ numeric targets if applicable"]
+    S4 -->|onb_step4_next| S5["Step 5 — Allergies & intolerances\n(multi-select toggles)"]
+    S5 -->|onb_finish| DONE["Done — Profile summary\n+ success message"]
+    DONE -->|go_to_chat_btn| PROFILE["Navigate to Perfil tab\nOnboarding tab hidden"]
+
+    S2 --> S1
+    S3 --> S2
+    S4 --> S3
+    S5 --> S4
+
+    style DONE fill:#059669,color:#fff
+    style PROFILE fill:#0284c7,color:#fff
+```
+
+**Account deletion flow (sidebar):**
+```
+🗑️ Remover Conta → confirmation group visible
+  ├─ Confirmar → delete_user_fn → delete_all_user_data(uid) → reload sidebar + tabs
+  └─ Cancelar  → confirmation group hidden
+```
+
+---
+
+## 8. Architecture decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
@@ -244,6 +277,9 @@ flowchart TD
 | Database | SQLite | Zero configuration, WAL mode for Gradio/Telegram concurrency |
 | LLM | Configurable (5 providers) | Avoids vendor lock-in; allows local execution (privacy) or cloud (performance) |
 | Interfaces | Telegram + Gradio | Telegram for mobile/daily use; Gradio for demo, dashboard and administration |
+| Onboarding (Gradio) | Dedicated wizard tab | Shown only when no account is selected; hides itself after completion and navigates to Profile |
+| Account management | Sidebar buttons | "➕ Criar nova conta" → Onboarding wizard; "🗑️ Remover Conta" → confirmed deletion via `delete_all_user_data` |
+| Telegram commands | English names | Commands renamed (`/profile`, `/edit`, `/preferences`, `/weight`, `/history`) for broader accessibility |
 | Tanita automation | Playwright | MyTanita portal has no public API; controlled scraping encapsulated in a tool |
 | Output language | European Portuguese | Target audience; enforced in the Coordinator's system prompt |
 | Dashboard reads | Direct SQLite/ChromaDB | Avoids LLM latency for purely data-driven views; keeps agent calls for natural-language tasks |

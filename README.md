@@ -244,6 +244,7 @@ When a new user sends `/start`, a guided onboarding flow is launched using inlin
 ```
 
 After onboarding the assistant immediately uses the profile to personalise all advice.
+Edit preferences at any time with `/preferences`.
 
 ### 💬 Conversational examples
 
@@ -259,11 +260,11 @@ After onboarding the assistant immediately uses the profile to personalise all a
 | Command | Description |
 |---|---|
 | `/start` | Welcome message — launches onboarding for new users |
-| `/perfil` | View current profile summary |
-| `/editar` | Edit profile fields (name, birth date, gender, height, weight, activity level, goal) |
-| `/preferencias` | Manage food likes/dislikes, allergies, dietary restrictions and health goals |
-| `/peso <kg>` | Log current weight |
-| `/historico` | View weight history and trend |
+| `/profile` | View current profile summary |
+| `/edit` | Edit profile fields (name, birth date, gender, height, weight, activity level, goal) |
+| `/preferences` | Manage food likes/dislikes, allergies, dietary restrictions and health goals |
+| `/weight <kg>` | Log current weight |
+| `/history` | View weight history and trend |
 | `/reset` | Clear conversation history (new session) |
 | `/help` | Show available commands |
 
@@ -271,15 +272,18 @@ After onboarding the assistant immediately uses the profile to personalise all a
 
 ## 🌐 Gradio Web UI
 
-A full web interface with **5 tabs**:
+A full web interface with **6 tabs**:
 
 | Tab | Description |
 |---|---|
-| 💬 **Conversa** | Chat with the agents in real time + XAI panel |
-| 👤 **O Meu Perfil** | Edit personal data and log weight (chart included) |
-| 🥗 **Preferências** | Manage likes, dislikes, allergies, restrictions and goals |
+| 🚀 **Onboarding** | Step-by-step new-user wizard (shown only when no account is selected) |
+| 👤 **Perfil** | Edit personal data and log weight (chart included) |
 | 🎯 **Objectivo** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
+| 🥗 **Nutrição e Gostos** | Manage likes, dislikes, allergies, restrictions and goals |
+| 💬 **Conversa** | Chat with the agents in real time + XAI panel |
 | ⚙️ **Administração** | Sub-tabs: Explicabilidade · Sessões · Logs · Base de Conhecimento |
+
+The **sidebar** shows the active account selector, a **➕ Criar nova conta** button (launches the Onboarding wizard), and a **🗑️ Remover Conta** button (with confirmation step before deleting all user data).
 
 > The **User ID** is shared across all tabs. Use your Telegram user ID to access existing profile data in the web UI.
 
@@ -346,6 +350,7 @@ MyHealthAssistant/
 │       ├── shared.py                 # Shared utilities (agent team, session mgmt, DB helpers)
 │       ├── styles.py                 # CSS styles
 │       └── tabs/                     # One module per tab
+│           ├── onboarding_tab.py     # 🚀 Onboarding wizard (new user creation)
 │           ├── chat_tab.py           # 💬 Conversa
 │           ├── profile_tab.py        # 👤 Perfil
 │           ├── goals_tab.py          # 🎯 Objectivo dashboard
