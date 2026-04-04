@@ -117,9 +117,10 @@ if exist ".env" (
 
 :: ── 8. Validate .env ─────────────────────────────────────────────────────────
 echo.
-echo [7/7] Validating .env...
+echo [7/8] Validating .env...
 
-set MISSING_COUNT=0
+set MISSING_LLM=0
+set MISSING_KEY=0
 
 :: Check LLM_PROVIDER
 set LLM_PROVIDER=
@@ -128,70 +129,85 @@ set LLM_PROVIDER=!LLM_PROVIDER: =!
 
 if "!LLM_PROVIDER!"=="" (
     echo [!]  Missing: LLM_PROVIDER
-    set /a MISSING_COUNT+=1
+    set MISSING_LLM=1
 ) else if "!LLM_PROVIDER!"=="your_provider" (
     echo [!]  Missing: LLM_PROVIDER ^(still set to placeholder^)
-    set /a MISSING_COUNT+=1
+    set MISSING_LLM=1
 ) else (
     echo [OK] LLM_PROVIDER = !LLM_PROVIDER!
 )
 
-echo.
-if !MISSING_COUNT! gtr 0 (
-    echo [!]  Some values in .env need to be filled in before running.
-    echo      Open .env in a text editor, fill in the missing values,
-    echo      then run: python main.py
+:: Check SECRET_KEY
+set SECRET_KEY=
+for /f "tokens=2 delims==" %%a in ('findstr /i "^SECRET_KEY" .env 2^>nul') do set SECRET_KEY=%%a
+set SECRET_KEY=!SECRET_KEY: =!
+
+if "!SECRET_KEY!"=="" (
+    echo [!]  Missing: SECRET_KEY
+    set MISSING_KEY=1
+) else if "!SECRET_KEY!"=="your_fernet_key_here" (
+    echo [!]  Missing: SECRET_KEY ^(still set to placeholder^)
+    set MISSING_KEY=1
 ) else (
-    echo [OK] All required .env values are set.
+    echo [OK] SECRET_KEY is set.
 )
 
-:: ── 8. Telegram bot token ─────────────────────────────────────────────────────
+:: ── 9. Telegram bot token ─────────────────────────────────────────────────────
 echo.
-echo [8/8] Verificando token do bot Telegram...
+echo [8/8] Checking Telegram bot token...
 
 set TG_STATUS=missing
-for /f "tokens=*" %%r in ('python -c "import sys; sys.path.insert(0,'.'); from tools.credential_store import get_telegram_token; t=get_telegram_token(); print('ok' if t else 'missing')" 2^>nul') do set TG_STATUS=%%r
+for /f "tokens=*" %%r in ('python -c "import sys; sys.path.insert(0,'.'); from tools.credential_store import get_telegram_token; print('ok' if get_telegram_token() else 'missing')" 2^>nul') do set TG_STATUS=%%r
 
 if "!TG_STATUS!"=="ok" (
-    echo [OK] Token do Telegram ja configurado no credential store.
+    echo [OK] Telegram bot token already configured in the credential store.
 ) else (
-    echo [!]  Token do Telegram ainda nao configurado.
-    echo      Obtem o token no @BotFather do Telegram e executa:
-    echo        python scripts\setup_telegram.py
+    echo [!]  Telegram bot token not yet configured.
 )
 
 :: ── Done ─────────────────────────────────────────────────────────────────────
 echo.
 echo ════════════════════════════════════════════════════
-echo  Setup completo!
+echo  Setup complete!
 echo ════════════════════════════════════════════════════
 echo.
-echo  Proximos passos:
+echo  Next steps:
 echo    %VENV_DIR%\Scripts\activate.bat
 echo.
+
+set STEP=1
+
+if !MISSING_LLM! equ 1 (
+    echo  !STEP!. Set your LLM provider in .env ^(see README step 2^):
+    echo       LLM_PROVIDER=ollama   # or gemini / openai / anthropic / lmstudio
+    echo.
+    set /a STEP+=1
+)
+
+if !MISSING_KEY! equ 1 (
+    echo  !STEP!. Generate the encryption key and add it to .env as SECRET_KEY:
+    echo       python -c "from cryptography.fernet import Fernet; print^(Fernet.generate_key^(^).decode^(^)^)"
+    echo.
+    set /a STEP+=1
+)
+
 if "!TG_STATUS!" neq "ok" (
-    echo  1. Guarda o token do bot Telegram ^(necessario antes de iniciar^):
+    echo  !STEP!. Save the Telegram bot token ^(required before starting^):
     echo       python scripts\setup_telegram.py
     echo.
-    echo  2. Inicia o assistente:
-    echo       python main.py
-    echo.
-    echo  3. Envia /start ao teu bot no Telegram para criar o perfil
-    echo.
-    echo  4. Servicos opcionais ^(apos criar o perfil^):
-    echo       Tanita : python scripts\setup_credentials.py
-    echo       Garmin : python scripts\garmin_browser_auth.py --user ^<id^>
-) else (
-    echo  1. Inicia o assistente:
-    echo       python main.py
-    echo.
-    echo  2. Envia /start ao teu bot no Telegram para criar o perfil
-    echo.
-    echo  3. Servicos opcionais ^(apos criar o perfil^):
-    echo       Tanita : python scripts\setup_credentials.py
-    echo       Garmin : python scripts\garmin_browser_auth.py --user ^<id^>
+    set /a STEP+=1
 )
+
+echo  !STEP!. Start the assistant:
+echo       python main.py
+set /a STEP+=1
 echo.
-echo  Interface web: http://localhost:7860
+echo  !STEP!. Send /start to your bot in Telegram to create your profile
+echo       Or open http://localhost:7860 and click + Create new account
+set /a STEP+=1
+echo.
+echo  !STEP!. Optional integrations ^(after creating your profile^):
+echo       Tanita : python scripts\setup_credentials.py
+echo       Garmin : python scripts\garmin_browser_auth.py --user ^<user_id^>
 echo.
 pause

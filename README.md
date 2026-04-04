@@ -65,6 +65,8 @@ scripts\setup.bat
 
 Creates the virtual environment, installs dependencies, installs Playwright and copies `.env.example` → `.env`.
 
+> If `.env` already exists the script keeps it — no values are overwritten.
+
 ---
 
 ### 2. Choose your LLM provider

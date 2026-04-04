@@ -135,69 +135,88 @@ else
     esac
 fi
 
+# SECRET_KEY
+secret=$(grep -E "^SECRET_KEY\s*=" .env 2>/dev/null | cut -d= -f2 | tr -d ' "' || true)
+if [ -z "$secret" ] || [ "$secret" = "your_fernet_key_here" ]; then
+    missing+=("SECRET_KEY")
+else
+    ok "SECRET_KEY is set."
+fi
+
 if [ ${#missing[@]} -gt 0 ]; then
     warn "The following values must be set in .env before running:"
     for k in "${missing[@]}"; do
         echo -e "    ${RED}•${NC} $k"
     done
-    echo ""
-    warn "Edit .env and re-run: ${BOLD}source $VENV_DIR/bin/activate && python main.py${NC}"
 else
     ok "All required .env values are set."
 fi
 
 # ── 8. Telegram bot token ─────────────────────────────────────────────────────
-step "8. Configurando token do bot Telegram..."
+step "8. Checking Telegram bot token..."
 
-# Check if token already stored in credential store
 token_stored=$("$VENV_DIR/bin/python" -c "
 import sys; sys.path.insert(0, '.')
 try:
     from tools.credential_store import get_telegram_token
-    t = get_telegram_token()
-    print('ok' if t else 'missing')
-except Exception as e:
+    print('ok' if get_telegram_token() else 'missing')
+except Exception:
     print('missing')
 " 2>/dev/null || echo "missing")
 
 if [ "$token_stored" = "ok" ]; then
-    ok "Token do Telegram já configurado no credential store."
+    ok "Telegram bot token already configured in the credential store."
 else
-    warn "Token do Telegram ainda não configurado."
-    echo ""
-    info "Obtém o token no @BotFather do Telegram e executa:"
-    echo -e "  ${BOLD}source $VENV_DIR/bin/activate && python scripts/setup_telegram.py${NC}"
-    echo ""
+    warn "Telegram bot token not yet configured."
 fi
 
 # ── 9. Done ───────────────────────────────────────────────────────────────────
-echo -e "\n${GREEN}${BOLD}Setup completo!${NC}"
+echo -e "\n${GREEN}${BOLD}Setup complete!${NC}"
 echo ""
-echo -e "${BOLD}Passos seguintes:${NC}"
+echo -e "${BOLD}Next steps:${NC}"
 echo -e "  ${BOLD}source $VENV_DIR/bin/activate${NC}"
 echo ""
+
+step_n=1
+
+# Step 2 (README): LLM provider — only if not configured
+if printf '%s\n' "${missing[@]}" | grep -qE "LLM_PROVIDER|API_KEY|HOST"; then
+    echo -e "  ${YELLOW}${step_n}.${NC} Set your LLM provider in ${BOLD}.env${NC} (see README step 2):"
+    echo -e "     ${BOLD}LLM_PROVIDER=ollama${NC}  # or gemini / openai / anthropic / lmstudio"
+    echo ""
+    step_n=$((step_n + 1))
+fi
+
+# Step 3 (README): SECRET_KEY — only if not set
+if printf '%s\n' "${missing[@]}" | grep -q "SECRET_KEY"; then
+    echo -e "  ${YELLOW}${step_n}.${NC} Generate the encryption key and add it to ${BOLD}.env${NC} as SECRET_KEY:"
+    echo -e '     python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"'
+    echo ""
+    step_n=$((step_n + 1))
+fi
+
+# Step 4 (README): Telegram token — only if not configured
 if [ "$token_stored" != "ok" ]; then
-    echo -e "  ${YELLOW}1.${NC} Guarda o token do bot Telegram (necessário antes de iniciar):"
+    echo -e "  ${YELLOW}${step_n}.${NC} Save the Telegram bot token (required before starting):"
     echo -e "     ${BOLD}python scripts/setup_telegram.py${NC}"
     echo ""
-    echo -e "  ${YELLOW}2.${NC} Inicia o assistente:"
-    echo -e "     ${BOLD}python main.py${NC}"
-    echo ""
-    echo -e "  ${YELLOW}3.${NC} Envia ${BOLD}/start${NC} ao teu bot no Telegram para criar o perfil"
-    echo ""
-    echo -e "  ${YELLOW}4.${NC} Configura serviços opcionais (após criar o perfil):"
-    echo -e "     Tanita:  ${BOLD}python scripts/setup_credentials.py${NC}"
-    echo -e "     Garmin:  ${BOLD}python scripts/garmin_browser_auth.py --user <id>${NC}"
-else
-    echo -e "  ${YELLOW}1.${NC} Inicia o assistente:"
-    echo -e "     ${BOLD}python main.py${NC}"
-    echo ""
-    echo -e "  ${YELLOW}2.${NC} Envia ${BOLD}/start${NC} ao teu bot no Telegram para criar o perfil"
-    echo ""
-    echo -e "  ${YELLOW}3.${NC} Configura serviços opcionais (após criar o perfil):"
-    echo -e "     Tanita:  ${BOLD}python scripts/setup_credentials.py${NC}"
-    echo -e "     Garmin:  ${BOLD}python scripts/garmin_browser_auth.py --user <id>${NC}"
+    step_n=$((step_n + 1))
 fi
+
+# Step 5 (README): Start
+echo -e "  ${YELLOW}${step_n}.${NC} Start the assistant:"
+echo -e "     ${BOLD}python main.py${NC}"
 echo ""
-echo -e "Interface web: ${BOLD}http://localhost:7860${NC}"
+step_n=$((step_n + 1))
+
+# Step 6 (README): Onboarding
+echo -e "  ${YELLOW}${step_n}.${NC} Send ${BOLD}/start${NC} to your bot in Telegram to create your profile"
+echo -e "     Or open ${BOLD}http://localhost:7860${NC} and click ➕ Create new account"
+echo ""
+step_n=$((step_n + 1))
+
+# Step 7 (README): Optional integrations
+echo -e "  ${YELLOW}${step_n}.${NC} Optional integrations (after creating your profile):"
+echo -e "     Tanita:  ${BOLD}python scripts/setup_credentials.py${NC}"
+echo -e "     Garmin:  ${BOLD}python scripts/garmin_browser_auth.py --user <user_id>${NC}"
 echo ""
