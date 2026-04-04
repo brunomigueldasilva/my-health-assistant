@@ -1,6 +1,6 @@
 # MyHealthAssistant — Personal Health Coach powered by AI
 
-> **O teu nutricionista, personal trainer e chef pessoal, disponível 24/7 no telemóvel, com total privacidade dos dados.**
+> **Your personal nutritionist, personal trainer, and chef, available 24/7 on your phone, with full data privacy.**
 
 A multi-agent personal health assistant with RAG, powered by the [Agno](https://github.com/agno-agi/agno) framework.
 Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram Bot** and a **Gradio Web UI**.
@@ -9,16 +9,16 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 
 ## 💡 Why MyHealthAssistant?
 
-| Serviço equivalente | Custo habitual | Com MyHealthAssistant |
+| Equivalent service | Typical cost | With MyHealthAssistant |
 |---|---|---|
-| Consulta de nutricionista | €60–120 / consulta | Planos ilimitados incluídos |
-| Personal trainer | €40–80 / sessão | Treinos ilimitados incluídos |
-| App de rastreio premium | €10–15 / mês | Gratuito (open-source) |
-| **Poupança estimada** | **€200–400 / mês** | **€0 com Ollama local** |
+| Nutritionist consultation | €60–120 / session | Unlimited plans included |
+| Personal trainer | €40–80 / session | Unlimited workouts included |
+| Premium tracking app | €10–15 / month | Free (open-source) |
+| **Estimated savings** | **€200–400 / month** | **€0 with local Ollama** |
 
-**Ganho de tempo:** redução de ~3 horas/semana de pesquisa e planeamento para menos de 5 minutos.
+**Time saved:** reduces ~3 hours/week of research and planning to under 5 minutes.
 
-**Privacidade total:** com Ollama ou LM Studio, nenhum dado sai do teu computador.
+**Full privacy:** with Ollama or LM Studio, no data ever leaves your computer.
 
 ---
 
@@ -227,17 +227,17 @@ When a new user sends `/start`, a guided onboarding flow is launched using inlin
  │    │    └─ Weight         → free text input  (ex: 78.5)        [skippable]
  │    ├─ Step 2 — Activity level  → 5 buttons (Sedentary → Very active)
  │    ├─ Step 3 — Health goals    → multi-select (up to 3 goals simultaneously)
- │    │    ├─ Perder peso / Ganhar massa muscular / Perder massa gorda
- │    │    ├─ Perder gordura visceral / Manter peso / Melhorar condição física
- │    │    ├─ Melhorar saúde em geral / Melhores hábitos alimentares
- │    │    ├─ Definir abdominais
+ │    │    ├─ Lose weight / Gain muscle mass / Lose body fat
+ │    │    ├─ Lose visceral fat / Maintain weight / Improve fitness
+ │    │    ├─ Improve overall health / Better eating habits
+ │    │    ├─ Get abs
  │    │    └─ Target goals → extra text input for the specific target value [skippable]:
- │    │         ├─ Atingir peso específico        (ex: 75 kg)
- │    │         ├─ Atingir massa muscular específica (ex: 65 kg ou 60%)
- │    │         ├─ Atingir gordura corporal específica (ex: 15%)
- │    │         └─ Atingir gordura visceral específica (ex: 6)
+ │    │         ├─ Reach specific weight           (e.g. 75 kg)
+ │    │         ├─ Reach specific muscle mass      (e.g. 65 kg or 60%)
+ │    │         ├─ Reach specific body fat         (e.g. 15%)
+ │    │         └─ Reach specific visceral fat     (e.g. 6)
  │    └─ Step 4 — Allergies  → 6 multi-select toggle buttons + "None" + Confirm
- │         (Glúten · Lactose · Frutos secos · Marisco · Ovos · Amendoins)
+ │         (Gluten · Lactose · Tree nuts · Shellfish · Eggs · Peanuts)
  │         → Profile summary shown on completion
  │
  └─ Returning user → welcome-back message (onboarding skipped)
@@ -248,12 +248,12 @@ Edit preferences at any time with `/preferences`.
 
 ### 💬 Conversational examples
 
-- **Nutrition**: "Quero um plano alimentar para perder gordura visceral"
-- **Workout**: "Sugere um treino HIIT de 30 minutos"
-- **Recipes**: "Dá-me uma receita saudável com frango e brócolos"
-- **Body composition**: "Sincroniza as minhas medições da Tanita"
-- **Goals**: "Quero chegar aos 75 kg em 3 meses"
-- **Preferences**: "Não gosto de beterraba nem fígado"
+- **Nutrition**: "Give me a meal plan to lose visceral fat"
+- **Workout**: "Suggest a 30-minute HIIT workout"
+- **Recipes**: "Give me a healthy recipe with chicken and broccoli"
+- **Body composition**: "Sync my Tanita measurements"
+- **Goals**: "I want to reach 75 kg in 3 months"
+- **Preferences**: "I don't like beetroot or liver"
 
 ### 📋 Commands
 
@@ -277,13 +277,13 @@ A full web interface with **6 tabs**:
 | Tab | Description |
 |---|---|
 | 🚀 **Onboarding** | Step-by-step new-user wizard (shown only when no account is selected) |
-| 👤 **Perfil** | Edit personal data and log weight (chart included) |
-| 🎯 **Objectivo** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
-| 🥗 **Nutrição e Gostos** | Manage likes, dislikes, allergies, restrictions and goals |
-| 💬 **Conversa** | Chat with the agents in real time + XAI panel |
-| ⚙️ **Administração** | Sub-tabs: Explicabilidade · Sessões · Logs · Base de Conhecimento |
+| 👤 **Profile** | Edit personal data and log weight (chart included) |
+| 🎯 **Goals** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
+| 🥗 **Nutrition & Preferences** | Manage likes, dislikes, allergies, restrictions and goals |
+| 💬 **Conversation** | Chat with the agents in real time + XAI panel |
+| ⚙️ **Administration** | Sub-tabs: Explainability · Sessions · Logs · Knowledge Base |
 
-The **sidebar** shows the active account selector, a **➕ Criar nova conta** button (launches the Onboarding wizard), and a **🗑️ Remover Conta** button (with confirmation step before deleting all user data).
+The **sidebar** shows the active account selector, a **➕ Create new account** button (launches the Onboarding wizard), and a **🗑️ Remove Account** button (with confirmation step before deleting all user data).
 
 > The **User ID** is shared across all tabs. Use your Telegram user ID to access existing profile data in the web UI.
 
@@ -294,7 +294,7 @@ The dashboard tab gives a real-time snapshot of health progress without needing 
 - **KPIs** — current values for body fat %, visceral fat, muscle mass and weight, each compared against the personalised target derived from the user's goals
 - **Progress charts** — interactive time-series for all four metrics, filterable by start date
 - **Progress summary** — natural-language summary of distance to each target and trend direction
-- **Smart target inference** — targets are automatically computed from the user's stated goals (e.g. "perder gordura visceral para nível 6" or "atingir 75 kg") using numeric extraction and BMI/lean-mass formulas as fallback
+- **Smart target inference** — targets are automatically computed from the user's stated goals (e.g. "lose visceral fat to level 6" or "reach 75 kg") using numeric extraction and BMI/lean-mass formulas as fallback
 
 ---
 
@@ -319,9 +319,9 @@ The **Body Composition Analyst** agent connects to [MyTanita.eu](https://mytanit
 | `physique_rating` | Physique rating (1–9) |
 
 **Example prompts:**
-- "Sincroniza as minhas medições da Tanita"
-- "Qual era a minha gordura corporal em 15/03/2026?"
-- "Mostra a evolução da minha gordura visceral nos últimos 3 meses"
+- "Sync my Tanita measurements"
+- "What was my body fat on 15/03/2026?"
+- "Show my visceral fat trend over the last 3 months"
 
 ---
 
@@ -351,11 +351,11 @@ MyHealthAssistant/
 │       ├── styles.py                 # CSS styles
 │       └── tabs/                     # One module per tab
 │           ├── onboarding_tab.py     # 🚀 Onboarding wizard (new user creation)
-│           ├── chat_tab.py           # 💬 Conversa
-│           ├── profile_tab.py        # 👤 Perfil
-│           ├── goals_tab.py          # 🎯 Objectivo dashboard
-│           ├── nutrition_tab.py      # 🥗 Nutrição e Gostos
-│           └── admin_tab.py          # ⚙️ Administração
+│           ├── chat_tab.py           # 💬 Conversation
+│           ├── profile_tab.py        # 👤 Profile
+│           ├── goals_tab.py          # 🎯 Goals dashboard
+│           ├── nutrition_tab.py      # 🥗 Nutrition & Preferences
+│           └── admin_tab.py          # ⚙️ Administration
 ├── knowledge/
 │   ├── __init__.py                   # KnowledgeBase class — ChromaDB wrapper
 │   └── seed_data.py                  # Initial seed data (nutrition + exercises)
@@ -432,7 +432,7 @@ The Coordinator enforces non-negotiable guardrails on every message before routi
 
 ## 🔍 Explainability (XAI)
 
-Every agent response is accompanied by a detailed XAI report available in the **Explicabilidade** tab (Gradio):
+Every agent response is accompanied by a detailed XAI report available in the **Explainability** tab (Gradio):
 
 - **Specialist activated** — which agent handled the request
 - **Tools called** — function name, arguments, and result summary
@@ -464,7 +464,7 @@ python -X utf8 eval/run_eval.py --output eval/report.json
 | Routing | Q01–Q09 | Each agent receives the correct message type |
 | Quality | Q10–Q14 | Responses include expected content (macros, recipe steps, formulas) |
 | Ethics | Q15–Q17 | Refusals triggered for extreme diets, diagnoses, off-topic requests |
-| Edge cases | Q18–Q20 | Informal language, English input replied in PT, allergen substitution |
+| Edge cases | Q18–Q20 | Informal language, English input replied in Portuguese, allergen substitution |
 
 ---
 
@@ -482,7 +482,7 @@ Just change `LLM_PROVIDER` in `.env` — no code changes required. The `get_mode
 
 ### Session persistence
 
-Agno automatically persists each session's history in `data/sessions.db`. Each user has one active session. `/reset` (Telegram) or "Nova Sessão" (Gradio) creates a new session without deleting previous history.
+Agno automatically persists each session's history in `data/sessions.db`. Each user has one active session. `/reset` (Telegram) or "New Session" (Gradio) creates a new session without deleting previous history.
 
 ### Log persistence
 
@@ -490,7 +490,7 @@ Logs are written in **append mode** across restarts — each run appends to `log
 
 ### User ID forwarding
 
-Every message arriving at the Coordinator is prefixed with `[Data de hoje: DD/MM/AAAA] [ID do utilizador: <UID>]`. The Coordinator extracts the UID and includes it verbatim at the top of every task routed to a specialist, ensuring all tool calls use the correct user account regardless of routing depth.
+Every message arriving at the Coordinator is prefixed with `[Today's date: DD/MM/YYYY] [User ID: <UID>]`. The Coordinator extracts the UID and includes it verbatim at the top of every task routed to a specialist, ensuring all tool calls use the correct user account regardless of routing depth.
 
 ---
 
