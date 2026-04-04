@@ -1,9 +1,15 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────────
 # MyHealthAssistant — Setup script (macOS / Linux)
-# Usage: bash setup.sh
+# Usage: bash scripts/setup.sh   (from the project root)
+#        OR:  cd scripts && bash setup.sh
 # ──────────────────────────────────────────────────────────────────────────────
 set -euo pipefail
+
+# Change to the project root regardless of where the script is called from
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+cd "$PROJECT_ROOT"
 
 VENV_DIR=".venv"
 PYTHON_MIN="3.11"

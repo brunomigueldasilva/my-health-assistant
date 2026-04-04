@@ -4,6 +4,7 @@ Shared utilities for the Gradio interface.
 Used by all tab modules and the main gradio_app entry point.
 """
 
+import re
 import sqlite3
 import sys
 import uuid
@@ -37,8 +38,14 @@ def _reset_session(uid: str) -> str:
     return _user_sessions[uid]
 
 
+_METADATA_RE = re.compile(
+    r"\[Data de hoje:[^\]]*\]\s*\[ID do utilizador:[^\]]*\]\s*\n?",
+)
+
+
 def _sanitize_reply(text: str) -> str:
-    """Replace raw API errors with user-friendly messages."""
+    """Strip routing metadata and replace raw API errors with user-friendly messages."""
+    text = _METADATA_RE.sub("", text).lstrip()
     t = text.lower()
     if "429" in t or "too many requests" in t or "resource_exhausted" in t or "quota" in t:
         return "De momento estou com muitos pedidos em simultâneo. Por favor, aguarda uns segundos e tenta novamente. 🙏"

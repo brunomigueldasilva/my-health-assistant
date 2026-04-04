@@ -19,6 +19,7 @@ from agents.nutritionist import nutritionist_agent
 from agents.trainer import trainer_agent
 from agents.chef import chef_agent
 from agents.body_composition_analyst import body_composition_analyst_agent
+from agents.activity_analyst import activity_analyst_agent
 from tools.profile_tools import PROFILE_TOOLS
 
 
@@ -42,6 +43,7 @@ def create_health_team() -> Team:
             trainer_agent,
             chef_agent,
             body_composition_analyst_agent,
+            activity_analyst_agent,
         ],
         db=SqliteDb(db_file=str(SQLITE_SESSIONS)),
         description=(
@@ -73,13 +75,14 @@ def create_health_team() -> Team:
 
             # ── User ID forwarding ──────────────────────────────────────────
             "USER ID — mandatory forwarding rule:",
-            "  • Every incoming message starts with: "
+            "  • Every incoming message begins with a metadata line in the exact format:",
             "    [Data de hoje: DD/MM/AAAA] [ID do utilizador: <UID>]",
-            "  • You MUST extract the exact UID value and ALWAYS include this "
-            "    metadata line verbatim at the very top of every task you route "
-            "    to a specialist. Example: if UID is 29255997, start the task with:",
-            "    '[Data de hoje: 31/03/2026] [ID do utilizador: 29255997]'",
-            "  • NEVER omit the user ID when routing — specialists need it to "
+            "  • You MUST copy this EXACT line, character by character, as the first "
+            "    line of every task you route to a specialist.",
+            "  • NEVER generate, invent, or substitute a different date or UID. "
+            "    NEVER use example values. The forwarded line must be IDENTICAL to "
+            "    the one received in the incoming message.",
+            "  • NEVER omit the metadata line when routing — specialists need it to "
             "    call tools with the correct user account.",
 
             # ── Date format ─────────────────────────────────────────────────
@@ -113,13 +116,27 @@ def create_health_team() -> Team:
             "  → PERSONAL TRAINER: exercises, workouts, training plans, muscle "
             "    groups, calories burned during exercise, HIIT, strength training, "
             "    cardio, flexibility, recovery.",
-            "  → BODY COMPOSITION ANALYST: Tanita scale sync, body composition history, "
-            "    body fat percentage, visceral fat, muscle mass, bone mass, BMR, "
-            "    metabolic age, body water, physique rating, IMC/BMI, weight as a "
-            "    health metric. Use this agent whenever the user mentions 'Tanita', "
-            "    'balança', 'sincronizar medições', 'composição corporal', 'gordura "
-            "    visceral', 'massa muscular', 'idade metabólica', or asks to "
-            "    sync/import scale data.",
+            "  → BODY COMPOSITION ANALYST: Tanita scale sync (download from MyTanita portal), "
+            "    body composition history, body fat percentage, visceral fat, muscle mass, "
+            "    bone mass, BMR, metabolic age, body water, physique rating, IMC/BMI, "
+            "    weight as a health metric. Use this agent whenever the user mentions "
+            "    'Tanita', 'balança', 'sincronizar medições', 'composição corporal', "
+            "    'gordura visceral', 'massa muscular', 'idade metabólica', or asks to "
+            "    sync/import scale data FROM the Tanita portal. "
+            "    EXCEPTION — do NOT route here if the request mentions 'Garmin' in the "
+            "    same sentence (e.g. 'sincroniza a Tanita com o Garmin', 'envia para o "
+            "    Garmin', 'sincroniza com o Garmin'): those must go to ACTIVITY ANALYST.",
+            "  → ACTIVITY ANALYST: Garmin Connect data, daily steps, calories burned, "
+            "    sleep quality, sleep score, body battery, resting heart rate, VO2 max, "
+            "    training status, training streak, recent activities (runs, rides, swims), "
+            "    weekly activity summary, activity trends. ALSO handles any request to "
+            "    push/send/sync Tanita body composition data TO Garmin Connect "
+            "    (keywords: 'sincroniza a Tanita com o Garmin', 'envia para o Garmin', "
+            "    'sincroniza com o Garmin', 'upload para o Garmin', 'carregar no Garmin'). "
+            "    Use this agent whenever the user mentions 'Garmin', 'passos', 'sono', "
+            "    'body battery', 'bateria corporal', 'streak de treinos', 'sequência de "
+            "    treinos', 'actividades recentes', 'VO2 max', 'treinos desta semana', "
+            "    'calorias activas', or asks about sleep data, activity data, or recovery.",
             "  → CHEF: recipe requests, specific meal ideas, food preparation "
             "    techniques, meal prep, breakfast/lunch/dinner/snack suggestions.",
             "  For profile, preferences, and goals questions, use the tools directly "

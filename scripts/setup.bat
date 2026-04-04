@@ -1,9 +1,13 @@
 @echo off
 :: ──────────────────────────────────────────────────────────────────────────────
 :: MyHealthAssistant — Setup script (Windows)
-:: Usage: setup.bat
+:: Usage: scripts\setup.bat   (from the project root)
+::        OR:  cd scripts && setup.bat
 :: ──────────────────────────────────────────────────────────────────────────────
 setlocal enabledelayedexpansion
+
+:: Change to the project root regardless of where the script is called from
+cd /d "%~dp0.."
 
 set VENV_DIR=.venv
 set MISSING_KEYS=

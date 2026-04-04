@@ -71,6 +71,14 @@ ANTHROPIC_MODEL   = os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-6")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 
 # ╔══════════════════════════════════════════════════════╗
+# ║              CREDENTIALS / ENCRYPTION               ║
+# ╚══════════════════════════════════════════════════════╝
+
+# Master key for Fernet encryption of per-user credentials stored in SQLite.
+# Generate once: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+SECRET_KEY = os.getenv("SECRET_KEY", "")
+
+# ╔══════════════════════════════════════════════════════╗
 # ║                    CHROMADB                          ║
 # ╚══════════════════════════════════════════════════════╝
 

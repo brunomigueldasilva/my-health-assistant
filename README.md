@@ -31,6 +31,7 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 | 🏋️ **Personal Trainer** | Workouts, exercises, routines, fitness plans |
 | 👨‍🍳 **Chef** | Personalised recipes respecting food preferences and allergies |
 | 📊 **Body Composition Analyst** | Syncs Tanita scale data, interprets body fat, visceral fat, muscle mass, BMR, metabolic age |
+| 🏃 **Activity Analyst** | Syncs Garmin Connect data — steps, calories, sleep, body battery, heart rate, VO2 max, training streak |
 | 🗄️ **RAG Knowledge Base** | ChromaDB with nutrition knowledge, exercise knowledge, and per-user preferences (food likes/dislikes, allergies, dietary restrictions, and health goals) |
 | 👤 **User Profile** | SQLite with personal data, weight history, and body composition history |
 | 💬 **Session Storage** | SQLite with per-user conversation history (managed by Agno) |
@@ -46,6 +47,7 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 - A Telegram account (Bot Token via [@BotFather](https://t.me/BotFather))
 - One of the supported LLM providers (see below)
 - *(Optional)* A [MyTanita](https://mytanita.eu) account for body composition sync
+- *(Optional)* A [Garmin Connect](https://connect.garmin.com) account for activity and sleep data
 
 ---
 
@@ -55,10 +57,10 @@ Supports **5 LLM providers** and runs two interfaces side by side: a **Telegram 
 
 ```bash
 # macOS / Linux
-bash setup.sh
+bash scripts/setup.sh
 
 # Windows
-setup.bat
+scripts\setup.bat
 ```
 
 The setup script will: check your Python version, create a virtual environment, install all dependencies, install Playwright, copy `.env.example` → `.env`, and validate your configuration.
@@ -180,7 +182,7 @@ source .venv/bin/activate
 
 pip install -r requirements.txt
 
-# Required for Tanita sync (browser automation)
+# Required for Tanita sync and Garmin browser authentication
 playwright install chromium
 ```
 
@@ -196,11 +198,48 @@ Edit `.env` and set at minimum:
 - `LLM_PROVIDER` — which provider to use
 - The matching API key / model (see step 1)
 - `TELEGRAM_BOT_TOKEN` — from @BotFather
-- *(Optional)* `USER_TANITA` + `PASS_TANITA` — for Tanita scale sync
+- `SECRET_KEY` — Fernet encryption key for the credential store (see step 5)
 
 ---
 
-#### 5. Run
+#### 5. Set up the encryption key and credentials
+
+**Generate the encryption key** (run once — paste the output into `.env` as `SECRET_KEY`):
+
+```bash
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+```
+
+**Add Tanita credentials** for a user (interactive):
+
+```bash
+python scripts/setup_credentials.py
+# → choose service: tanita
+# → enter user ID, email and password
+```
+
+Or from a Python shell:
+
+```python
+from tools.credential_store import set_credential
+set_credential("<user_id>", "tanita", "email@mytanita.eu", "password")
+```
+
+**Add Garmin credentials / run browser authentication:**
+
+Garmin Connect's SSO blocks programmatic login. A one-time browser flow is required per user to obtain long-lived OAuth tokens (~6 months):
+
+```bash
+python scripts/garmin_browser_auth.py --user <user_id>
+```
+
+This opens a Chromium window — log in with your Garmin account. Tokens are saved to `data/garmin_tokens/<user_id>/` and reused automatically. **No password is stored after the flow completes.**
+
+> `<user_id>` is the Telegram numeric user ID (or any custom identifier you use in the Gradio UI).
+
+---
+
+#### 6. Run
 
 ```bash
 python main.py
@@ -252,6 +291,7 @@ Edit preferences at any time with `/preferences`.
 - **Workout**: "Suggest a 30-minute HIIT workout"
 - **Recipes**: "Give me a healthy recipe with chicken and broccoli"
 - **Body composition**: "Sync my Tanita measurements"
+- **Activity**: "How many steps did I take this week?" / "How was my sleep last night?"
 - **Goals**: "I want to reach 75 kg in 3 months"
 - **Preferences**: "I don't like beetroot or liver"
 
@@ -272,13 +312,14 @@ Edit preferences at any time with `/preferences`.
 
 ## 🌐 Gradio Web UI
 
-A full web interface with **6 tabs**:
+A full web interface with **7 tabs**:
 
 | Tab | Description |
 |---|---|
 | 🚀 **Onboarding** | Step-by-step new-user wizard (shown only when no account is selected) |
 | 👤 **Profile** | Edit personal data and log weight (chart included) |
 | 🎯 **Goals** | Dashboard — current KPIs, progress charts (body fat, visceral fat, weight, muscle mass) and goal tracking |
+| 🏃 **Activity** | Garmin Connect dashboard — steps, calories, sleep, body battery, resting HR, VO2 max, training streak and recent activities |
 | 🥗 **Nutrition & Preferences** | Manage likes, dislikes, allergies, restrictions and goals |
 | 💬 **Conversation** | Chat with the agents in real time + XAI panel |
 | ⚙️ **Administration** | Sub-tabs: Explainability · Sessions · Logs · Knowledge Base |
@@ -302,7 +343,7 @@ The dashboard tab gives a real-time snapshot of health progress without needing 
 
 The **Body Composition Analyst** agent connects to [MyTanita.eu](https://mytanita.eu) and automatically downloads your scale measurements using browser automation (Playwright). No manual export needed.
 
-**Metrics tracked** (13 fields per measurement):
+**Metrics tracked** (11 fields per measurement):
 
 | Metric | Description |
 |---|---|
@@ -332,9 +373,12 @@ MyHealthAssistant/
 ├── main.py                           # Entry point — starts Telegram bot + Gradio UI
 ├── requirements.txt
 ├── .env / .env.example
-├── setup.sh                          # Setup script (macOS / Linux)
-├── setup.bat                         # Setup script (Windows)
 ├── ARCHITECTURE.md                   # Flow diagrams and architecture decisions
+├── scripts/
+│   ├── setup.sh                      # Setup script (macOS / Linux)
+│   ├── setup.bat                     # Setup script (Windows)
+│   ├── setup_credentials.py          # Interactive credential setup (Tanita + Garmin)
+│   └── garmin_browser_auth.py        # Garmin OAuth browser flow (generates tokens)
 ├── config/
 │   └── __init__.py                   # Configuration constants + LLM model factory
 ├── agents/
@@ -342,7 +386,8 @@ MyHealthAssistant/
 │   ├── nutritionist.py               # Nutritionist agent
 │   ├── trainer.py                    # Personal Trainer agent
 │   ├── chef.py                       # Chef agent
-│   └── body_composition_analyst.py   # Body Composition Analyst agent (Tanita)
+│   ├── body_composition_analyst.py   # Body Composition Analyst agent (Tanita)
+│   └── activity_analyst.py           # Activity Analyst agent (Garmin Connect)
 ├── interfaces/
 │   ├── telegram_bot.py               # Telegram interface + onboarding flow
 │   └── gradio/                       # Gradio Web UI
@@ -355,6 +400,7 @@ MyHealthAssistant/
 │           ├── profile_tab.py        # 👤 Profile
 │           ├── goals_tab.py          # 🎯 Goals dashboard
 │           ├── nutrition_tab.py      # 🥗 Nutrition & Preferences
+│           ├── activity_tab.py       # 🏃 Activity dashboard (Garmin Connect)
 │           └── admin_tab.py          # ⚙️ Administration
 ├── knowledge/
 │   ├── __init__.py                   # KnowledgeBase class — ChromaDB wrapper
@@ -363,7 +409,9 @@ MyHealthAssistant/
 │   ├── nutrition_tools.py            # Calories, macros, food lookup (Open Food Facts fallback)
 │   ├── exercise_tools.py             # Exercises, workout plans, calorie burn (MET)
 │   ├── profile_tools.py              # Profile, preferences, weight history, goals sync
-│   └── tanita_tools.py               # Tanita portal sync via Playwright
+│   ├── tanita_tools.py               # Tanita portal sync via Playwright
+│   ├── garmin_tools.py               # Garmin Connect API (steps, sleep, HR, activities, …)
+│   └── credential_store.py           # Encrypted per-user credential store (Fernet/SQLite)
 ├── xai/
 │   └── __init__.py                   # ExplainabilityTracker + @xai_tool decorator
 ├── eval/
@@ -378,11 +426,51 @@ MyHealthAssistant/
 │   └── test_xai.py
 ├── data/
 │   ├── chromadb/                     # Vector store (preferences, nutrition, exercises)
-│   ├── user_profiles.db              # SQLite — profiles, weight history, body composition
+│   ├── garmin_tokens/                # Per-user Garmin OAuth tokens (data/garmin_tokens/<uid>/)
+│   ├── user_profiles.db              # SQLite — profiles, weight history, body composition, credentials
 │   └── sessions.db                   # SQLite — conversation sessions (Agno)
 └── logs/
     └── health-assistant.log          # Rotating log (5 MB × 3 files, append across runs)
 ```
+
+---
+
+## 🏃 Garmin Connect Integration
+
+The **Activity Analyst** agent retrieves training and wellness data from [Garmin Connect](https://connect.garmin.com) via the `garminconnect` library. Since Garmin's SSO rate-limits programmatic password login, a **one-time browser authentication** is required per user.
+
+### First-time setup
+
+```bash
+# 1. Generate the encryption key and add it to .env as SECRET_KEY
+python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+
+# 2. Run the browser auth flow (opens a Chromium window)
+python scripts/garmin_browser_auth.py --user <user_id>
+```
+
+Log in with your Garmin account in the browser. OAuth tokens are saved to `data/garmin_tokens/<user_id>/` and reused automatically for ~6 months. **No password is stored.**
+
+### Metrics available
+
+| Metric | Description |
+|---|---|
+| `steps` | Daily step count and goal |
+| `calories_active` / `calories_total` | Active and total calories burned |
+| `sleep_duration_h` / `sleep_score` | Sleep duration and quality score |
+| `body_battery_start` / `body_battery_end` | Body Battery energy level |
+| `resting_heart_rate` | Resting HR (bpm) |
+| `vo2max` | VO2 max estimate |
+| `training_streak_days` | Consecutive active days |
+| Activities list | Type, duration, distance, calories, average HR |
+
+### Example prompts
+
+- "How many steps did I take this week?"
+- "How was my sleep last night?"
+- "Show my body battery trend over the last 2 weeks"
+- "What activities did I do this month?"
+- "What's my VO2 max?"
 
 ---
 
@@ -397,6 +485,7 @@ The project uses **three persistent stores**, each with a distinct role:
 | `user_profiles` | `user_id`, `name`, `birth_date`, `gender`, `height_cm`, `weight_kg`, `activity_level`, `goal`, `created_at`, `updated_at` |
 | `weight_history` | `user_id`, `weight_kg`, `recorded_at` |
 | `body_composition_history` | `user_id`, `measured_at`, `weight_kg`, `bmi`, `body_fat_pct`, `visceral_fat`, `muscle_mass_kg`, `muscle_quality`, `bone_mass_kg`, `bmr_kcal`, `metabolic_age`, `body_water_pct`, `physique_rating` |
+| `user_credentials` | `user_id`, `service` (tanita / garmin), `username_enc`, `password_enc`, `updated_at` — Fernet-encrypted |
 
 ### SQLite — `data/sessions.db`
 

@@ -10,17 +10,16 @@ import io
 import logging
 import os
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional
 
 from config import SQLITE_DB
+from tools.credential_store import get_credential
 from xai import xai_tool
 
 logger = logging.getLogger(__name__)
 
 TANITA_LOGIN_URL = "https://mytanita.eu/en/user/login"
-USER_TANITA = os.getenv("USER_TANITA", "")
-PASS_TANITA = os.getenv("PASS_TANITA", "")
 
 # Map CSV column headers to DB column names.
 # Multiple variants handle regional/version differences in the export.
@@ -148,7 +147,7 @@ def _screenshot_path(step: str) -> str:
     return os.path.join(tempfile.gettempdir(), f"tanita_debug_{step}.png")
 
 
-def _download_csv_via_playwright(headless: bool = True) -> str:
+def _download_csv_via_playwright(username: str, password: str, headless: bool = True) -> str:
     """
     Open a Chromium browser, log in to MyTanita, navigate to
     My Measurements → Import/Export, and return the downloaded CSV as a string.
@@ -156,9 +155,6 @@ def _download_csv_via_playwright(headless: bool = True) -> str:
     Set headless=False to watch the browser (useful for debugging).
     """
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
-
-    if not USER_TANITA or not PASS_TANITA:
-        raise ValueError("USER_TANITA and PASS_TANITA must be set in .env")
 
     with sync_playwright() as pw:
         browser = pw.chromium.launch(headless=headless)
@@ -185,7 +181,7 @@ def _download_csv_via_playwright(headless: bool = True) -> str:
                 'input[placeholder*="mail" i]',
             ):
                 if page.locator(sel).count() > 0:
-                    page.fill(sel, USER_TANITA)
+                    page.fill(sel, username)
                     email_filled = True
                     logger.info("Tanita: filled email using selector '%s'", sel)
                     break
@@ -205,7 +201,7 @@ def _download_csv_via_playwright(headless: bool = True) -> str:
                 'input[id*="password" i]',
             ):
                 if page.locator(sel).count() > 0:
-                    page.fill(sel, PASS_TANITA)
+                    page.fill(sel, password)
                     break
 
             # Submit — press Enter or click the submit button
@@ -235,7 +231,7 @@ def _download_csv_via_playwright(headless: bool = True) -> str:
                 page.screenshot(path=_screenshot_path("login_failed"))
                 raise RuntimeError(
                     f"Login failed — still on login page ({page.url}). "
-                    "Check USER_TANITA / PASS_TANITA credentials in .env. "
+                    "Check Tanita credentials stored via credential_store. "
                     f"Debug screenshot: {_screenshot_path('login_failed')}"
                 )
 
@@ -431,32 +427,38 @@ def _insert_rows(conn: sqlite3.Connection, rows: list[dict]) -> tuple[int, int]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 @xai_tool
-def sync_tanita_measurements(user_id: str | int) -> str:
+def sync_tanita_measurements(user_id: str | int, days: int | None = 30) -> str:
     """
     Sync body composition measurements from MyTanita scale portal.
 
-    Logs in to mytanita.eu using the credentials in .env (USER_TANITA /
-    PASS_TANITA), downloads the full CSV export from My Measurements →
-    Import/Export, parses all body composition fields, and stores them in
-    the local database.  Duplicate entries (same user + timestamp) are
-    automatically skipped.
+    Logs in to mytanita.eu using the per-user credentials stored in the
+    credential store (service name "tanita"), downloads the full CSV export
+    from My Measurements → Import/Export, parses all body composition fields,
+    and stores them in the local database. Duplicate entries (same user +
+    timestamp) are automatically skipped.
 
     Args:
         user_id: Telegram user ID
+        days: Only import measurements from the last N days. Default is 30.
+            Pass None to import all available measurements.
 
     Returns:
         Summary of how many new measurements were imported
     """
     user_id = str(user_id)
 
-    if not USER_TANITA or not PASS_TANITA:
+    creds = get_credential(user_id, "tanita")
+    if not creds:
         return (
-            "❌ Credenciais MyTanita não configuradas.\n"
-            "Adiciona USER_TANITA e PASS_TANITA ao ficheiro .env."
+            "❌ Credenciais MyTanita não configuradas para este utilizador.\n"
+            "Guarda as credenciais com:\n"
+            "  from tools.credential_store import set_credential\n"
+            f"  set_credential('{user_id}', 'tanita', 'email@exemplo.com', 'password')"
         )
+    tanita_user, tanita_pass = creds
 
     try:
-        csv_content = _download_csv_via_playwright()
+        csv_content = _download_csv_via_playwright(tanita_user, tanita_pass)
     except Exception as exc:
         logger.error("Tanita download failed: %s", exc, exc_info=True)
         return f"❌ Erro ao aceder ao MyTanita: {exc}"
@@ -467,6 +469,10 @@ def sync_tanita_measurements(user_id: str | int) -> str:
             "⚠️ O ficheiro CSV foi descarregado mas não continha dados reconhecíveis. "
             "Verifica o formato da exportação."
         )
+
+    if days is not None:
+        cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+        rows = [r for r in rows if r.get("measured_at", "") >= cutoff]
 
     conn = _get_db()
     inserted, skipped = _insert_rows(conn, rows)
@@ -484,8 +490,9 @@ def sync_tanita_measurements(user_id: str | int) -> str:
     conn.commit()
     conn.close()
 
+    period_info = f"últimos {days} dias" if days is not None else "todos os registos"
     return (
-        f"✅ Sincronização MyTanita concluída!\n"
+        f"✅ Sincronização MyTanita concluída ({period_info})!\n"
         f"  • {inserted} nova(s) medição(ões) importada(s)\n"
         f"  • {skipped} duplicado(s) ignorado(s)\n"
         f"  • {weight_synced} peso(s) adicionado(s) ao gráfico\n"

@@ -10,7 +10,7 @@ Multi-agent personal health system built with [Agno](https://github.com/agno-agi
 graph TB
     subgraph Interfaces
         TG["Telegram Bot\n(onboarding · commands · chat)"]
-        GR["Gradio Web UI\n(6 tabs — Onboarding · Perfil · Conversa\n· Objectivo · Nutrição · Admin)"]
+        GR["Gradio Web UI\n(7 tabs — Onboarding · Perfil · Objectivo\n· Actividade · Nutrição · Conversa · Admin)"]
     end
 
     subgraph agnoTeam["Agno Team — mode=route"]
@@ -19,6 +19,7 @@ graph TB
         TR["Personal Trainer\nAgent"]
         CH["Chef\nAgent"]
         BC["Body Composition\nAnalyst Agent"]
+        AA["Activity Analyst\nAgent"]
     end
 
     subgraph tools["Tools & Data"]
@@ -26,8 +27,10 @@ graph TB
         NT["Nutrition Tools"]
         ET["Exercise Tools"]
         TT["Tanita Tools\n(Playwright)"]
+        GT["Garmin Tools\n(garminconnect)"]
+        CS["Credential Store\n(Fernet/SQLite)"]
         KB["ChromaDB\n(RAG Vector Store)"]
-        DB["SQLite\nuser_profiles · sessions"]
+        DB["SQLite\nuser_profiles · sessions · credentials"]
     end
 
     subgraph llmProviders["LLM Providers"]
@@ -45,15 +48,20 @@ graph TB
     CO -->|route| TR
     CO -->|route| CH
     CO -->|route| BC
+    CO -->|route| AA
     CO -->|direct tools| PT
 
     NU --> NT & PT
     TR --> ET & PT
     CH --> NT & PT
     BC --> TT & PT
+    AA --> GT & PT
 
     NT & ET --> KB
     PT --> DB
+    TT --> CS
+    GT --> CS
+    CS --> DB
 
     GR -.->|direct SQLite read| DB
     GR -.->|direct ChromaDB read| KB
@@ -82,6 +90,7 @@ flowchart TD
     CO -->|"exercise · workout\nHIIT · strength · cardio"| TR["Personal Trainer"]
     CO -->|"recipe · meal idea\nbreakfast · dinner"| CH["Chef"]
     CO -->|"Tanita · body fat\nvisceral fat · muscle mass\nBMI · metabolic age"| BC["Analista Composição Corporal"]
+    CO -->|"Garmin · steps · sleep\nbody battery · activities\nVO2 max · heart rate"| AA["Analista de Actividade"]
     CO -->|"profile · preferences\ngoals · delete data"| TOOLS["Profile Tools\n(resposta directa)"]
 
     NU & TR & CH & BC & TOOLS --> RESP["Resposta em\nPortuguês de Portugal"]
@@ -268,7 +277,39 @@ flowchart TD
 
 ---
 
-## 8. Architecture decisions
+## 8. Credential store & Garmin authentication
+
+Per-user credentials (Tanita and Garmin) are **never stored in `.env`**. They are encrypted with Fernet (AES-128-CBC + HMAC) and kept in the `user_credentials` table in `user_profiles.db`.
+
+```mermaid
+flowchart LR
+    SCRIPT["scripts/setup_credentials.py\n(interactive CLI)"]
+    STORE["tools/credential_store.py\nset_credential / get_credential"]
+    DB["SQLite\nuser_credentials\n(username_enc · password_enc)"]
+    KEY["SECRET_KEY (.env)\nFernet master key"]
+
+    SCRIPT -->|set_credential| STORE
+    STORE -->|encrypt + INSERT| DB
+    STORE <-->|decrypt on read| KEY
+```
+
+**Garmin OAuth browser flow** (`scripts/garmin_browser_auth.py`):
+
+Garmin blocks programmatic SSO login with 429 rate-limits. The browser script uses Playwright (Chromium) to complete the login interactively, exchanges the resulting SSO ticket for garth-compatible OAuth1 + OAuth2 tokens, and saves them to `data/garmin_tokens/<user_id>/`. The `garmin_tools.py` module resumes the session from this token cache — no password is stored after the flow.
+
+```
+scripts/garmin_browser_auth.py --user <uid>
+  └─ Playwright opens Chromium
+       └─ User logs in at connect.garmin.com
+            └─ SSO ticket → OAuth1 + OAuth2 exchange
+                 └─ Tokens saved to data/garmin_tokens/<uid>/
+                      └─ garmin_tools.py loads tokens on first call
+                           └─ Garmin session cached in memory for the run
+```
+
+---
+
+## 9. Architecture decisions
 
 | Decision | Choice | Rationale |
 |---|---|---|
@@ -281,6 +322,9 @@ flowchart TD
 | Account management | Sidebar buttons | "➕ Criar nova conta" → Onboarding wizard; "🗑️ Remover Conta" → confirmed deletion via `delete_all_user_data` |
 | Telegram commands | English names | Commands renamed (`/profile`, `/edit`, `/preferences`, `/weight`, `/history`) for broader accessibility |
 | Tanita automation | Playwright | MyTanita portal has no public API; controlled scraping encapsulated in a tool |
+| Garmin auth | Browser OAuth (Playwright) | Garmin SSO rate-limits programmatic login (HTTP 429); one-time browser flow issues long-lived tokens |
+| Credential storage | Fernet-encrypted SQLite | Per-user secrets never in `.env`; encrypted at rest with a single master key; reuses existing DB |
+| Setup scripts | `scripts/` directory | Keeps root clean; scripts use `cd ..` so they work from either the root or the `scripts/` folder |
 | Output language | European Portuguese | Target audience; enforced in the Coordinator's system prompt |
 | Dashboard reads | Direct SQLite/ChromaDB | Avoids LLM latency for purely data-driven views; keeps agent calls for natural-language tasks |
 | Goals storage | ChromaDB + SQLite sync | ChromaDB for semantic agent queries; SQLite for fast dashboard target inference |

@@ -5,8 +5,9 @@ Business logic and UI builder for the profile tab.
 Covers: personal info, weight tracking, body composition charts, GDPR controls.
 """
 
+import html as _html
 import sys
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -574,6 +575,120 @@ def load_all_comp_charts(user_id, period: str = "Último Ano") -> tuple:
     )
 
 
+# ── Tanita records table ─────────────────────────────────
+
+_EMPTY_TABLE_HTML = (
+    "<div style='color:#475569;padding:20px;text-align:center;"
+    "background:#0f172a;border-radius:12px;font:12px Inter,sans-serif'>"
+    "Sem registos Tanita. Importa os dados na tab Actividade.</div>"
+)
+
+
+def _build_tanita_table(rows: list) -> str:
+    if not rows:
+        return _EMPTY_TABLE_HTML
+
+    table_rows = ""
+    for i, r in enumerate(rows):
+        bg = "#1e293b" if i % 2 == 0 else "#0f172a"
+        date_str  = (r["measured_at"] or "")[:16]
+        weight    = f"{r['weight_kg']:.1f} kg"   if r["weight_kg"]   is not None else "—"
+        bmi       = f"{r['bmi']:.1f}"             if r["bmi"]         is not None else "—"
+        fat       = f"{r['body_fat_pct']:.1f} %"  if r["body_fat_pct"] is not None else "—"
+        visceral  = f"{r['visceral_fat']:.0f}"    if r["visceral_fat"] is not None else "—"
+        muscle    = f"{r['muscle_mass_kg']:.1f} kg" if r["muscle_mass_kg"] is not None else "—"
+        water     = f"{r['body_water_pct']:.1f} %" if r["body_water_pct"] is not None else "—"
+        metage    = f"{r['metabolic_age']}"        if r["metabolic_age"] is not None else "—"
+        bmr       = f"{r['bmr_kcal']:.0f} kcal"   if r["bmr_kcal"]    is not None else "—"
+
+        table_rows += (
+            f"<tr style='background:{bg}'>"
+            f"<td>{date_str}</td>"
+            f"<td>{weight}</td>"
+            f"<td>{bmi}</td>"
+            f"<td>{fat}</td>"
+            f"<td>{visceral}</td>"
+            f"<td>{muscle}</td>"
+            f"<td>{water}</td>"
+            f"<td>{metage}</td>"
+            f"<td>{bmr}</td>"
+            f"</tr>"
+        )
+
+    inner = f"""<!DOCTYPE html><html>
+<head><meta charset="utf-8"><style>
+  *{{box-sizing:border-box;margin:0;padding:0}}
+  body{{background:#0f172a;font-family:Inter,sans-serif;padding:10px 14px;overflow:auto}}
+  .title{{color:#cbd5e1;font:600 11px/1 Inter,sans-serif;letter-spacing:.06em;
+          text-transform:uppercase;margin-bottom:8px}}
+  table{{width:100%;border-collapse:collapse;font-size:11px}}
+  th{{background:#1e293b;color:#64748b;font:600 9px/1 Inter,sans-serif;letter-spacing:.07em;
+      text-transform:uppercase;padding:7px 10px;text-align:left;
+      border-bottom:1px solid rgba(255,255,255,0.06)}}
+  td{{color:#cbd5e1;padding:7px 10px;border-bottom:1px solid rgba(255,255,255,0.04)}}
+  td:nth-child(4){{color:#f87171}}
+  td:nth-child(6){{color:#34d399}}
+  td:nth-child(7){{color:#60a5fa}}
+</style></head>
+<body>
+  <div class="title">Registos Tanita ({len(rows)} medições)</div>
+  <table>
+    <thead><tr>
+      <th>Data/Hora</th><th>Peso</th><th>IMC</th><th>Gordura</th>
+      <th>G. Visceral</th><th>Músculo</th><th>Água</th><th>Id. Metabólica</th><th>TMB</th>
+    </tr></thead>
+    <tbody>{table_rows}</tbody>
+  </table>
+</body></html>"""
+
+    n_rows = len(rows)
+    height = 50 + 26 * min(n_rows, 20) + 40
+    esc = _html.escape(inner, quote=True)
+    return f'<iframe srcdoc="{esc}" style="width:100%;height:{height}px;border:none;border-radius:12px;display:block;"></iframe>'
+
+
+_TANITA_PERIOD_DAYS = {
+    "Últimas 10":     None,
+    "Último Mês":     30,
+    "Últimos 6 Meses": 180,
+    "Último Ano":     365,
+    "Últimos 5 Anos": 1825,
+}
+
+
+def load_tanita_table(user_id: str, period: str = "Último Ano") -> str:
+    uid = (user_id or "").strip()
+    if not uid:
+        return _EMPTY_TABLE_HTML
+    try:
+        conn = _db_conn(SQLITE_DB)
+        if period == "Últimas 10":
+            rows = conn.execute(
+                """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
+                          muscle_mass_kg, body_water_pct, metabolic_age, bmr_kcal
+                   FROM body_composition_history
+                   WHERE user_id = ?
+                   ORDER BY measured_at DESC
+                   LIMIT 10""",
+                (uid,),
+            ).fetchall()
+        else:
+            days = _TANITA_PERIOD_DAYS.get(period, 365)
+            cutoff = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d")
+            rows = conn.execute(
+                """SELECT measured_at, weight_kg, bmi, body_fat_pct, visceral_fat,
+                          muscle_mass_kg, body_water_pct, metabolic_age, bmr_kcal
+                   FROM body_composition_history
+                   WHERE user_id = ? AND measured_at >= ?
+                   ORDER BY measured_at DESC""",
+                (uid, cutoff),
+            ).fetchall()
+        conn.close()
+        return _build_tanita_table([dict(r) for r in rows])
+    except Exception as e:
+        return f"<div style='color:#f87171;padding:12px'>❌ Erro: {e}</div>"
+
+
 # ── GDPR + weight entry ──────────────────────────────────
 
 def gdpr_export_fn(user_id: str):
@@ -707,6 +822,15 @@ def build_profile_tab() -> SimpleNamespace:
             chart_metage   = gr.HTML()
             chart_bone     = gr.HTML()
 
+    with gr.Accordion("📋 Registos Tanita", open=False):
+        tanita_period = gr.Dropdown(
+            choices=["Últimas 10", "Último Mês", "Últimos 6 Meses", "Último Ano", "Últimos 5 Anos"],
+            value="Último Ano",
+            label="Período",
+            interactive=True,
+        )
+        tanita_records = gr.HTML()
+
     with gr.Accordion("🔒 Privacidade e Dados (RGPD)", open=False):
         gr.Markdown(
             "Os teus dados são processados exclusivamente para fins de assistência "
@@ -750,6 +874,8 @@ def build_profile_tab() -> SimpleNamespace:
         chart_bmr=chart_bmr,
         chart_metage=chart_metage,
         chart_bone=chart_bone,
+        tanita_period=tanita_period,
+        tanita_records=tanita_records,
         gdpr_export_btn=gdpr_export_btn,
         gdpr_delete_btn=gdpr_delete_btn,
         gdpr_status=gdpr_status,

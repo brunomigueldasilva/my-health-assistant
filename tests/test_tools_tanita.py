@@ -341,62 +341,48 @@ class TestGetBodyCompositionHistory:
 # ── sync_tanita_measurements ──────────────────────────────────────────────────
 
 class TestSyncTanitaMeasurements:
-    def test_missing_credentials_returns_error(self, monkeypatch):
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "")
-        result = sync_tanita_measurements("user1")
+    def test_missing_credentials_returns_error(self):
+        with patch("tools.tanita_tools.get_credential", return_value=None):
+            result = sync_tanita_measurements("user1")
         assert "❌" in result
-        assert "USER_TANITA" in result
+        assert "credential" in result.lower() or "credenciais" in result.lower()
 
-    def test_playwright_exception_returns_error(self, monkeypatch, tmp_tanita_db):
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "user@test.com")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "secret")
-        with patch(
-            "tools.tanita_tools._download_csv_via_playwright",
-            side_effect=RuntimeError("Network error"),
-        ):
+    def test_playwright_exception_returns_error(self, tmp_tanita_db):
+        with patch("tools.tanita_tools.get_credential", return_value=("user@test.com", "secret")), \
+             patch(
+                "tools.tanita_tools._download_csv_via_playwright",
+                side_effect=RuntimeError("Network error"),
+             ):
             result = sync_tanita_measurements("user1")
         assert "❌" in result
         assert "Network error" in result
 
-    def test_empty_csv_returns_warning(self, monkeypatch, tmp_tanita_db):
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "user@test.com")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "secret")
-        with patch(
-            "tools.tanita_tools._download_csv_via_playwright", return_value=""
-        ):
+    def test_empty_csv_returns_warning(self, tmp_tanita_db):
+        with patch("tools.tanita_tools.get_credential", return_value=("user@test.com", "secret")), \
+             patch("tools.tanita_tools._download_csv_via_playwright", return_value=""):
             result = sync_tanita_measurements("user1")
         assert "⚠️" in result
         assert "CSV" in result
 
-    def test_successful_sync_reports_inserted_count(self, monkeypatch, tmp_tanita_db):
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "user@test.com")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "secret")
-        with patch(
-            "tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV
-        ):
+    def test_successful_sync_reports_inserted_count(self, tmp_tanita_db):
+        with patch("tools.tanita_tools.get_credential", return_value=("user@test.com", "secret")), \
+             patch("tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV):
             result = sync_tanita_measurements("user1")
         assert "✅" in result
         assert "1 nova(s) medição(ões)" in result
 
-    def test_second_sync_reports_duplicates_skipped(self, monkeypatch, tmp_tanita_db):
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "user@test.com")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "secret")
-        with patch(
-            "tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV
-        ):
+    def test_second_sync_reports_duplicates_skipped(self, tmp_tanita_db):
+        with patch("tools.tanita_tools.get_credential", return_value=("user@test.com", "secret")), \
+             patch("tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV):
             sync_tanita_measurements("user1")
             result = sync_tanita_measurements("user1")
         assert "0 nova(s)" in result
         assert "1 duplicado(s)" in result
 
-    def test_user_id_coerced_to_string(self, monkeypatch, tmp_tanita_db):
+    def test_user_id_coerced_to_string(self, tmp_tanita_db):
         """Integer user_id should not raise."""
-        monkeypatch.setattr("tools.tanita_tools.USER_TANITA", "user@test.com")
-        monkeypatch.setattr("tools.tanita_tools.PASS_TANITA", "secret")
-        with patch(
-            "tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV
-        ):
+        with patch("tools.tanita_tools.get_credential", return_value=("user@test.com", "secret")), \
+             patch("tools.tanita_tools._download_csv_via_playwright", return_value=COMMA_CSV):
             result = sync_tanita_measurements(12345)
         assert "✅" in result
 

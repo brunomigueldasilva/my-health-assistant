@@ -26,11 +26,13 @@ from tabs.profile_tab import (
     save_profile,
     load_weight_chart,
     load_all_comp_charts,
+    load_tanita_table,
     gdpr_export_fn,
     gdpr_delete_fn,
     add_weight_entry,
 )
 from tabs.goals_tab import build_goals_tab, load_full_dashboard
+from tabs.activity_tab import build_activity_tab, load_activity_dashboard, run_tanita_garmin_sync, run_tanita_portal_sync
 from tabs.nutrition_tab import (
     build_nutrition_tab,
     load_all_prefs,
@@ -96,9 +98,13 @@ with gr.Blocks(title="Health Assistant") as demo:
 
         # Hidden state — driven programmatically; used as input across all tabs
         global_uid = gr.State(value=_initial_uid)
-        # Mirrors profile.comp_period so timer/load chains always have a valid
-        # value even when the Profile tab or its accordion is not active.
+        # Mirrors profile.weight_period / comp_period / tanita_period so timer
+        # and load chains always have a valid value — the timer captures component
+        # values at tick time, so any user change made mid-chain would be lost
+        # without these state mirrors.
+        weight_period_state = gr.State(value="Último Ano")
         comp_period_state = gr.State(value="Último Ano")
+        tanita_period_state = gr.State(value="Último Ano")
 
         new_user_btn = gr.Button("➕ Criar nova conta", variant="secondary", size="sm")
         delete_user_btn = gr.Button("🗑️ Remover Conta", variant="stop", size="sm")
@@ -125,6 +131,9 @@ with gr.Blocks(title="Health Assistant") as demo:
 
         with gr.Tab("🎯 Objectivo", id="goals") as goals_tab_ref:
             goals = build_goals_tab()
+
+        with gr.Tab("🏃 Actividade", id="activity") as activity_tab_ref:
+            activity = build_activity_tab()
 
         with gr.Tab("🥗 Nutrição e Gostos", id="nutrition") as nutrition_tab_ref:
             nutrition = build_nutrition_tab()
@@ -275,13 +284,59 @@ with gr.Blocks(title="Health Assistant") as demo:
     profile_tab_ref.select(
         load_profile, inputs=[global_uid], outputs=_profile_fields,
     ).then(
-        load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
+        load_weight_chart, inputs=[global_uid, weight_period_state], outputs=[profile.weight_chart],
+    ).then(
+        load_tanita_table, inputs=[global_uid, tanita_period_state], outputs=[profile.tanita_records],
     )
     goals_tab_ref.select(
         load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     )
     nutrition_tab_ref.select(
         load_all_prefs, inputs=[global_uid], outputs=_PREF_CHECKS,
+    )
+
+    _activity_outputs = [
+        activity.act_kpis,
+        activity.act_chart_calories,
+        activity.act_chart_steps,
+        activity.act_chart_sleep_score,
+        activity.act_chart_sleep_duration,
+        activity.act_chart_battery,
+        activity.act_chart_hr,
+        activity.act_recent,
+        activity.act_status,
+    ]
+
+    activity_tab_ref.select(
+        load_activity_dashboard,
+        inputs=[activity.period_dropdown, global_uid],
+        outputs=_activity_outputs,
+    )
+    activity.refresh_btn.click(
+        load_activity_dashboard,
+        inputs=[activity.period_dropdown, global_uid],
+        outputs=_activity_outputs,
+    )
+    activity.period_dropdown.change(
+        load_activity_dashboard,
+        inputs=[activity.period_dropdown, global_uid],
+        outputs=_activity_outputs,
+    )
+    activity.portal_sync_btn.click(
+        lambda: "⏳ A sincronizar dados Tanita... (pode demorar alguns segundos)",
+        outputs=[activity.portal_sync_status],
+    ).then(
+        run_tanita_portal_sync,
+        inputs=[global_uid],
+        outputs=[activity.portal_sync_status],
+    )
+    activity.sync_btn.click(
+        lambda: "⏳ A sincronizar dados com o Garmin...",
+        outputs=[activity.sync_status],
+    ).then(
+        run_tanita_garmin_sync,
+        inputs=[global_uid, activity.sync_limit],
+        outputs=[activity.sync_status],
     )
 
     def _load_xai():
@@ -318,7 +373,8 @@ with gr.Blocks(title="Health Assistant") as demo:
         lambda uid: gr.update(choices=_load_category_list(uid, "goals"), value=[]),
         inputs=[global_uid],
         outputs=[profile.goals_check],
-    ).then(load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart])
+    ).then(load_weight_chart, inputs=[global_uid, weight_period_state], outputs=[profile.weight_chart],
+    ).then(load_tanita_table, inputs=[global_uid, tanita_period_state], outputs=[profile.tanita_records])
 
     # pf_age is display-only (computed from birth_date) — excluded from save inputs
     _save_fields = [f for f in _profile_fields if f is not profile.pf_age]
@@ -352,6 +408,10 @@ with gr.Blocks(title="Health Assistant") as demo:
         load_weight_chart,
         inputs=[global_uid, profile.weight_period],
         outputs=[profile.weight_chart],
+    ).then(
+        lambda p: p,
+        inputs=[profile.weight_period],
+        outputs=[weight_period_state],
     )
     profile.comp_period.change(
         load_all_comp_charts,
@@ -361,6 +421,15 @@ with gr.Blocks(title="Health Assistant") as demo:
         lambda p: p,
         inputs=[profile.comp_period],
         outputs=[comp_period_state],
+    )
+    profile.tanita_period.change(
+        load_tanita_table,
+        inputs=[global_uid, profile.tanita_period],
+        outputs=[profile.tanita_records],
+    ).then(
+        lambda p: p,
+        inputs=[profile.tanita_period],
+        outputs=[tanita_period_state],
     )
 
     # Goals in profile tab
@@ -553,9 +622,11 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[user_select],
         outputs=_profile_fields,
     ).then(
-        load_weight_chart, inputs=[user_select, profile.weight_period], outputs=[profile.weight_chart],
+        load_weight_chart, inputs=[user_select, weight_period_state], outputs=[profile.weight_chart],
     ).then(
         load_all_comp_charts, inputs=[user_select, comp_period_state], outputs=_comp_outputs,
+    ).then(
+        load_tanita_table, inputs=[user_select, tanita_period_state], outputs=[profile.tanita_records],
     ).then(
         load_all_prefs, inputs=[user_select], outputs=_PREF_CHECKS,
     ).then(
@@ -617,9 +688,11 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[global_uid],
         outputs=_profile_fields,
     ).then(
-        load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
+        load_weight_chart, inputs=[global_uid, weight_period_state], outputs=[profile.weight_chart],
     ).then(
         load_all_comp_charts, inputs=[global_uid, comp_period_state], outputs=_comp_outputs,
+    ).then(
+        load_tanita_table, inputs=[global_uid, tanita_period_state], outputs=[profile.tanita_records],
     ).then(
         load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     ).then(
@@ -643,9 +716,11 @@ with gr.Blocks(title="Health Assistant") as demo:
         inputs=[global_uid],
         outputs=_profile_fields,
     ).then(
-        load_weight_chart, inputs=[global_uid, profile.weight_period], outputs=[profile.weight_chart],
+        load_weight_chart, inputs=[global_uid, weight_period_state], outputs=[profile.weight_chart],
     ).then(
         load_all_comp_charts, inputs=[global_uid, comp_period_state], outputs=_comp_outputs,
+    ).then(
+        load_tanita_table, inputs=[global_uid, tanita_period_state], outputs=[profile.tanita_records],
     ).then(
         load_full_dashboard, inputs=[global_uid, goals.dash_start_date], outputs=_dash_outputs,
     ).then(

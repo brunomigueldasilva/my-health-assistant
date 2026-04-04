@@ -61,7 +61,9 @@ body_composition_analyst_agent = Agent(
         # ── Sync & data retrieval ──────────────────────────────────────────
         "DATA SYNC:",
         "  • Use sync_tanita_measurements when the user asks to sync, import, or "
-        "    update their Tanita scale data.",
+        "    update their Tanita scale data. Always pass days=None to sync the full "
+        "    history unless the user explicitly asks for a specific recent period "
+        "    (e.g. 'só os últimos 7 dias').",
         "  • Use get_body_composition_history to review body composition trends. "
         "    Pass limit=1000 whenever the user asks about long-term trends, the "
         "    oldest/first record, or history spanning months or years. "
